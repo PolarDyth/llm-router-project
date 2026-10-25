@@ -1,0 +1,6 @@
+pandas>=2.0
+datasets>=5.1,<6
+sentence-transformers>=6.2,<7
+huggingface-hub>=1.31,<3
+transformers>=5,<6
+torch>=2.0
