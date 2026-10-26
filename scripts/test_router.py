@@ -26,7 +26,7 @@ with json_path.open("r", encoding="utf-8") as f:
     model_profiles: dict[str, dict[str, str]] = json.load(f)
 
 # 3. Define the test prompt
-user_prompt = "Write a complex PyTorch script to train a neural network with distributed data parallel."
+user_prompt = "you are a helpful assistant that can answer questions about LLMs. I want to know which model is best for answering questions about the latest research in AI and machine learning."
 
 # 4. Build pairs for every model that has a description
 model_names: list[str] = []
@@ -48,8 +48,8 @@ scores: list[float] = [float(s) for s in model.predict(pairs)]
 results = sorted(zip(model_names, scores), key=lambda item: item[1], reverse=True)
 
 print(f"\nUser Prompt: '{user_prompt}'\n")
-print("Top 5 Recommended Models:")
-for rank, (name, score) in enumerate(results[:5], 1):
+print("Top 20 Recommended Models:")
+for rank, (name, score) in enumerate(results[:20], 1):
     desc = model_profiles[name].get("description", "No description")
     # Truncate the description if it's too long for the terminal
     short_desc = (desc[:100] + '...') if len(desc) > 100 else desc
