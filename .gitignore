@@ -1,4 +1,10 @@
 data/
 models/
 venv/
+.venv/
+__pycache__/
+
+.zcode/
+.vscode/
+.pyright-tmp/
 __pycache__/
