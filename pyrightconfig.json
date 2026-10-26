@@ -2,5 +2,5 @@
   "typeCheckingMode": "basic",
   "venvPath": ".",
   "venv": ".venv",
-  "executionEnvironments": [{ "root": "." }]
+  "executionEnvironments": [{ "root": ".", "extraPaths": [".", "scripts"] }]
 }

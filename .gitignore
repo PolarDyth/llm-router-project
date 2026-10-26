@@ -1,8 +1,15 @@
-data/
+# Everything under data/ is local build output, except the model registry,
+# which is generated but meant to be checked in.
+data/*
+data/model_registry/*
+!data/model_registry/
+!data/model_registry/models.json
+!data/model_registry/overrides.yaml
 models/
 venv/
 .venv/
 __pycache__/
+eval_reports/
 
 .zcode/
 .vscode/

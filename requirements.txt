@@ -4,6 +4,7 @@ sentence-transformers>=6.2,<7
 huggingface-hub>=1.31,<3
 transformers>=5,<6
 wordfreq>=3.0
+pyyaml>=6.0
 # PyPI macOS/Linux wheels work out of the box (MPS / bundled CUDA), but for
 # NVIDIA on Windows, AMD on Linux (ROCm), or AMD on Windows (ROCm wheels or
 # torch-directml for older cards), install the matching torch build FIRST —

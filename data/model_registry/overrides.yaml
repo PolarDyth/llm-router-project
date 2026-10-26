@@ -1,0 +1,164 @@
+# Hand-maintained overrides for the model complexity registry.
+# Everything here wins over the automated price/quality scoring.
+#
+# models:
+#   <canonical_id>:
+#     complexity: 3          # force the integer tier (required to CREATE an entry)
+#     score: 3.2             # force the continuous score
+#     released: "2024-05-13"
+#     display_name: "GPT-4o"
+#     notes: "why this override exists"
+#     aliases:               # EXTRA aliases merged into the entry
+#       - "some-other-name"
+#     signals:               # patch individual signals (nulls ignored)
+#       params_b: 70
+#
+# excludes: [<canonical_id>, ...]   # drop junk merge groups entirely
+
+excludes:
+  - anthropic/claude        # bare "claude" junk group; real models are claude-1/2/instant
+
+models:
+  # ---- 2023-era models pruned from the live catalogs (arena data needs them)
+  anthropic/claude-1:
+    complexity: 2
+    released: "2023-03-14"
+    display_name: "Claude 1"
+    aliases: [claude, claude-v1, claude-1.3]
+    notes: "created via override; absent from live catalogs. gpt-3.5-class"
+  anthropic/claude-2:
+    complexity: 3
+    released: "2023-07-11"
+    display_name: "Claude 2"
+    aliases: [claude-2.0, claude-2.1]
+    notes: "created via override. 2023 second tier, below gpt-4"
+  anthropic/claude-instant-1.1:
+    complexity: 2
+    released: "2023-03-30"
+    display_name: "Claude Instant 1.1"
+    aliases: [claude-instant-1.0]
+    notes: "created via override"
+  anthropic/claude-instant-1.2:
+    complexity: 2
+    released: "2023-08-11"
+    notes: "price-based score overstates a 2023 lightweight model; era-corrected"
+  google/palm-2:
+    complexity: 2
+    released: "2023-05-10"
+    display_name: "PaLM 2 (Bison)"
+    notes: "created via override. arena-era bison tier ~= gpt-3.5"
+  google/gemini-1.0-pro:
+    complexity: 3
+    released: "2023-12-06"
+    display_name: "Gemini 1.0 Pro"
+    aliases: [gemini-1.0-pro-001]
+    notes: "created via override. 2023 frontier tier, below gpt-4"
+  google/gemini-1.0-pro-vision:
+    complexity: 3
+    released: "2023-12-06"
+    display_name: "Gemini 1.0 Pro Vision"
+    notes: "created via override"
+  google/gemini-1.5-flash:
+    complexity: 2
+    released: "2024-05-11"
+    display_name: "Gemini 1.5 Flash"
+    notes: "created via override. mini-class"
+  google/gemini-1.5-pro:
+    complexity: 4
+    released: "2024-02-15"
+    display_name: "Gemini 1.5 Pro"
+    notes: "created via override. gpt-4o-class"
+  openai/text-davinci-003:
+    complexity: 2
+    released: "2022-11-28"
+    display_name: "text-davinci-003"
+    notes: "created via override. pre-gpt-4 frontier = tier 2"
+  google/gemma-3n-e4b:
+    complexity: 2
+    released: "2025-06-26"
+    display_name: "Gemma 3n E4B"
+    notes: "created via override; effective-4B open model"
+
+  # ---- early-2023 open models from arena data (all absent from live catalogs)
+  meta/vicuna-13b:
+    complexity: 2
+    released: "2023-03-30"
+    display_name: "Vicuna 13B"
+    aliases: [vicuna-13b-v1.1, vicuna-13b-v1.3]
+    notes: "created via override"
+  meta/vicuna-7b:
+    complexity: 1
+    released: "2023-03-30"
+    display_name: "Vicuna 7B"
+    aliases: [vicuna-7b-v1.1, vicuna-7b-v1.3]
+    notes: "created via override"
+  meta/alpaca-13b:
+    complexity: 2
+    released: "2023-03-13"
+    display_name: "Alpaca 13B"
+    notes: "created via override"
+  meta/llama-13b:
+    complexity: 2
+    released: "2023-02-24"
+    display_name: "LLaMA 13B"
+    aliases: [llama-13b-ring]
+    notes: "created via override"
+  meta/guanaco-33b:
+    complexity: 2
+    released: "2023-05-23"
+    display_name: "Guanaco 33B"
+    notes: "created via override"
+  berkeley/koala-13b:
+    complexity: 2
+    released: "2023-04-03"
+    display_name: "Koala 13B"
+    notes: "created via override"
+  laion/oasst-pythia-12b:
+    complexity: 2
+    released: "2023-03-25"
+    display_name: "OASST Pythia 12B"
+    aliases: [oasst-sft-1-pythia-12b]
+    notes: "created via override"
+  rwkv/rwkv-4-raven-14b:
+    complexity: 2
+    released: "2023-04-10"
+    display_name: "RWKV-4 Raven 14B"
+    notes: "created via override"
+  zhipu/chatglm-6b:
+    complexity: 1
+    released: "2023-03-14"
+    display_name: "ChatGLM 6B"
+    aliases: [chatglm2-6b, chatglm3-6b]
+    notes: "created via override"
+  lmsys/fastchat-t5-3b:
+    complexity: 1
+    released: "2023-04-12"
+    display_name: "FastChat T5 3B"
+    notes: "created via override"
+  databricks/dolly-v2-12b:
+    complexity: 2
+    released: "2023-04-12"
+    display_name: "Dolly v2 12B"
+    notes: "created via override"
+  microsoft/wizardlm-13b:
+    complexity: 2
+    released: "2023-04-28"
+    display_name: "WizardLM 13B"
+    aliases: [wizardlm-30b]
+    notes: "created via override"
+  nomic-ai/gpt4all-13b-snoozy:
+    complexity: 2
+    released: "2023-05-18"
+    display_name: "GPT4All 13B Snoozy"
+    notes: "created via override"
+  stability-ai/stablelm-tuned-alpha-7b:
+    complexity: 1
+    released: "2023-04-20"
+    display_name: "StableLM Tuned Alpha 7B"
+    notes: "created via override"
+  mosaic/mpt-7b:
+    complexity: 1
+    released: "2023-05-05"
+    display_name: "MPT 7B Chat"
+    aliases: [mpt-7b-chat]
+    notes: "created via override"
