@@ -41,7 +41,8 @@ models:
   anthropic/claude-instant-1.2:
     complexity: 2
     released: "2023-08-11"
-    notes: "price-based score overstates a 2023 lightweight model; era-corrected"
+    aliases: [claude-instant-1, claude-instant-v1]
+    notes: "price-based score overstates a 2023 lightweight model; era-corrected; + arena/routerbench raw names"
   google/palm-2:
     complexity: 2
     released: "2023-05-10"
@@ -51,8 +52,8 @@ models:
     complexity: 3
     released: "2023-12-06"
     display_name: "Gemini 1.0 Pro"
-    aliases: [gemini-1.0-pro-001]
-    notes: "created via override. 2023 frontier tier, below gpt-4"
+    aliases: [gemini-1.0-pro-001, gemini-pro-dev-api]
+    notes: "created via override. 2023 frontier tier, below gpt-4; + arena 55k serving name"
   google/gemini-1.0-pro-vision:
     complexity: 3
     released: "2023-12-06"
@@ -62,12 +63,14 @@ models:
     complexity: 2
     released: "2024-05-11"
     display_name: "Gemini 1.5 Flash"
-    notes: "created via override. mini-class"
+    aliases: [gemini-1.5-flash-api, gemini-1.5-flash-api-0514]
+    notes: "created via override. mini-class; + arena 100k serving names"
   google/gemini-1.5-pro:
     complexity: 4
     released: "2024-02-15"
     display_name: "Gemini 1.5 Pro"
-    notes: "created via override. gpt-4o-class"
+    aliases: [gemini-1.5-pro-api, gemini-1.5-pro-api-0514, gemini-1.5-pro-exp-0801]
+    notes: "created via override. gpt-4o-class; + arena 100k serving names"
   openai/text-davinci-003:
     complexity: 2
     released: "2022-11-28"
@@ -144,8 +147,8 @@ models:
     complexity: 2
     released: "2023-04-28"
     display_name: "WizardLM 13B"
-    aliases: [wizardlm-30b]
-    notes: "created via override"
+    aliases: [wizardlm-30b, wizardlm-13b-v1.2]
+    notes: "created via override; + routerbench v1.2 spelling"
   nomic-ai/gpt4all-13b-snoozy:
     complexity: 2
     released: "2023-05-18"
@@ -162,3 +165,163 @@ models:
     display_name: "MPT 7B Chat"
     aliases: [mpt-7b-chat]
     notes: "created via override"
+
+  # ---- arena-human-preference-55k/100k gaps (2023-24 open models + raw-name aliases)
+  meta/llama-2-70b:
+    aliases: [llama2-70b-steerlm-chat, llama2-70b-steerlm]
+    notes: "nvidia steerlm variant of llama-2-70b, arena 55k"
+  microsoft/phi-3-mini:
+    aliases: [phi-3-mini-4k-instruct-june-2024, phi-3-mini-4k-instruct, phi-3-mini-128k-instruct]
+    notes: "arena 100k raw names for phi-3-mini"
+  mistral/openhermes-2p5-mistral-7b:
+    aliases: [openhermes-2.5-mistral-7b]
+    notes: "arena 55k dot-spelling of 2p5"
+  upstage/solar-mini:
+    aliases: [solar-10.7b-instruct-v1.0, solar-10.7b-instruct]
+    notes: "arena 55k name = SOLAR ST 10.7B (solar-mini lineage)"
+  huggingface/zephyr-7b:
+    aliases: [zephyr-7b-alpha, zephyr-7b-beta]
+    notes: "arena 55k suffix variants"
+  unknown/openchat-3p5-0106-7b:
+    aliases: [openchat-3.5, openchat-3.5-0106]
+    notes: "arena 55k dot-spelling of 3p5"
+  google/gemma-2-9b:
+    aliases: [gemma-2-9b-it, gemma-2-9b-it-simpo]
+    notes: "arena 100k -it and simpo variants"
+  databricks/dbrx:
+    aliases: [dbrx-next]
+    notes: "arena 100k 'dbrx-next' was the June 2024 dbrx refresh, never separately released"
+  unknown/snowflake-arctic:
+    complexity: 3
+    released: "2024-04-24"
+    aliases: [snowflake-arctic-instruct]
+    notes: "force tier 3: 480B MoE (D17B), dbrx-class; catalog guess had no basis; + arena 100k alias"
+  01-ai/yi-1.5-34b:
+    complexity: 2
+    released: "2024-05-13"
+    display_name: "Yi-1.5 34B"
+    aliases: [yi-1.5-34b-chat, yi-1.5-34b-chat-16k]
+    notes: "created via override; yi-34b refresh, params tier"
+  meta/vicuna-33b:
+    complexity: 2
+    released: "2023-06-01"
+    display_name: "Vicuna 33B"
+    aliases: [vicuna-33b, vicuna-33b-v1.3]
+    notes: "created via override; 33B class = guanaco-33b tier"
+  microsoft/wizardlm-70b:
+    complexity: 3
+    released: "2023-08-01"
+    display_name: "WizardLM 70B"
+    aliases: [wizardlm-70b]
+    notes: "created via override; llama-2-70b-class finetune"
+  allenai/tulu-2-dpo-70b:
+    complexity: 3
+    released: "2023-11-24"
+    display_name: "Tulu 2 DPO 70B"
+    aliases: [tulu-2-dpo-70b, tulu-2-70b]
+    notes: "created via override; llama-2-70b-class finetune"
+  deepseek/deepseek-llm-67b-chat:
+    complexity: 3
+    released: "2023-11-29"
+    display_name: "DeepSeek LLM 67B Chat"
+    aliases: [deepseek-llm-67b-chat]
+    notes: "created via override; 67B base, deepseek-chat lineage tier"
+  deepseek/deepseek-v2:
+    complexity: 3
+    released: "2024-05-06"
+    display_name: "DeepSeek V2"
+    aliases: [deepseek-v2-api, deepseek-v2-api-0628, deepseek-v2-chat, deepseek-v2-0628, deepseek-2-api]
+    notes: "created via override; 236B MoE mid-frontier, deepseek-chat-class"
+  qwen/qwen-14b:
+    complexity: 2
+    released: "2023-08-03"
+    display_name: "Qwen 14B"
+    aliases: [qwen-14b-chat]
+    notes: "created via override; 14B class"
+  qwen/qwen1.5-72b:
+    complexity: 3
+    released: "2024-02-05"
+    display_name: "Qwen1.5 72B"
+    aliases: [qwen1.5-72b-chat]
+    notes: "created via override; 72B, llama-2-70b-class"
+  qwen/qwen1.5-7b:
+    complexity: 2
+    released: "2024-02-05"
+    display_name: "Qwen1.5 7B"
+    aliases: [qwen1.5-7b-chat]
+    notes: "created via override; 7B class = zephyr tier"
+  mosaic/mpt-30b:
+    complexity: 2
+    released: "2023-06-22"
+    display_name: "MPT 30B Chat"
+    aliases: [mpt-30b-chat, mpt-30b-instruct]
+    notes: "created via override; 30B class"
+  togethercomputer/stripedhyena-nous-7b:
+    complexity: 2
+    released: "2023-10-01"
+    display_name: "StripedHyena Nous 7B"
+    aliases: [stripedhyena-nous-7b]
+    notes: "created via override; 7B class"
+  berkeley-nest/starling-lm-7b:
+    complexity: 2
+    released: "2023-10-10"
+    display_name: "Starling LM 7B"
+    aliases: [starling-lm-7b-alpha, starling-lm-7b-beta]
+    notes: "created via override; 7B class"
+  cognitivecomputations/dolphin-2.2.1-mistral-7b:
+    complexity: 2
+    released: "2023-11-01"
+    display_name: "Dolphin 2.2.1 Mistral 7B"
+    aliases: [dolphin-2.2.1-mistral-7b]
+    notes: "created via override; 7B class"
+  tiiuae/falcon-180b:
+    complexity: 3
+    released: "2023-09-06"
+    display_name: "Falcon 180B"
+    aliases: [falcon-180b-chat]
+    notes: "created via override; 180B params but 2023 open quality, dbrx-class"
+  nexusflow/athene-70b:
+    complexity: 4
+    released: "2024-08-14"
+    display_name: "Athene 70B"
+    aliases: [athene-70b, athene-70b-0725]
+    notes: "created via override; near-gpt-4o arena performance (2024-08)"
+  google/gemma-2-2b:
+    complexity: 1
+    released: "2024-06-27"
+    display_name: "Gemma 2 2B"
+    aliases: [gemma-2-2b-it]
+    notes: "created via override; 2B class"
+  google/gemma-1.1-7b:
+    complexity: 2
+    released: "2024-04-09"
+    display_name: "Gemma 1.1 7B"
+    aliases: [gemma-1.1-7b-it]
+    notes: "created via override; 7B class = zephyr tier"
+  zhipu/glm-4:
+    complexity: 3
+    released: "2024-01-16"
+    display_name: "GLM-4"
+    aliases: [glm-4, glm-4-0520]
+    notes: "created via override; 2024 flagship, deepseek-chat-class"
+  nvidia/nemotron-4-340b:
+    complexity: 3
+    released: "2024-06-14"
+    display_name: "Nemotron 4 340B"
+    aliases: [nemotron-4-340b-instruct]
+    notes: "created via override; 340B MoE mid-frontier, dbrx-class"
+  unknown/eureka-chatbot:
+    complexity: 3
+    released: "2024-07-13"
+    display_name: "Eureka Chatbot"
+    aliases: [eureka-chatbot]
+    notes: "created via override; unattributed arena stealth entrant (Jul 2024), community suspected Google; tier set mid"
+  meta/code-llama-34b-instruct:
+    aliases: [code-llama-instruct-34b-chat]
+    notes: "routerbench raw name for codellama 34b instruct"
+  qwen/qwen1.5-4b:
+    complexity: 1
+    released: "2024-02-05"
+    display_name: "Qwen1.5 4B"
+    aliases: [qwen1.5-4b-chat]
+    notes: "created via override; 4B class"

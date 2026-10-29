@@ -39,6 +39,11 @@ HAND_ALIASES = {
     "o1-preview": "openai/o1",
     "o1-2024-12-17": "openai/o1",
     "claude-instant": "anthropic/claude-instant-1.2",
+    # release-number spellings: normalization strips "-v2", which would
+    # otherwise collapse onto whatever entry claims bare "claude", so these
+    # must be matched on the raw name (see resolve())
+    "claude-v1": "anthropic/claude-1",
+    "claude-v2": "anthropic/claude-2",
     # arena's "amazon-nova-experimental-chat" reduces to bare "nova"
     "nova": "amazon/nova-pro",
 }
@@ -63,8 +68,8 @@ def normalize_name(raw: str) -> str:
     changed = True
     while changed:
         changed = False
-        if re.match(r"^[a-z]{2}(?:-[a-z0-9]+)?\.", s):  # bedrock regions ca. jp. us-gov.
-            s = re.sub(r"^[a-z]{2}(?:-[a-z0-9]+)?\.", "", s, count=1)
+        if re.match(r"^[a-z]{2}\.", s):  # bedrock regions ca. jp. kr. (us-gov. handled above)
+            s = re.sub(r"^[a-z]{2}\.", "", s, count=1)
             changed = True
         for ns in ("anthropic.", "amazon.", "meta.", "ai21.", "cohere.", "mistral.",
                    "deepseek.", "writer.", "luma.", "stability.", "twelvelabs.",
@@ -127,7 +132,7 @@ class ModelRegistry:
         s = name.strip().lower()
         # historical meaning wins for ambiguous marketing names ("gemini-pro"):
         # our training data is 2022-2025, where these names meant the originals
-        hand = HAND_ALIASES.get(normalize_name(s))
+        hand = HAND_ALIASES.get(s) or HAND_ALIASES.get(normalize_name(s))
         if hand is not None:
             entry = self._by_key.get(hand)
             if entry is not None:

@@ -61,7 +61,14 @@ SOURCES = {
 # hand aliases are normalized names of models whose name loses tier info when
 # stripped; values are canonical registry keys (defined in router/model_registry.py)
 
-PRICE_EDGES = [(0.05, 1.0), (0.15, 1.7), (0.70, 2.7), (4.0, 3.9), (15.0, 4.9), (30.0, 5.0)]
+PRICE_EDGES = [
+    (0.05, 1.0),
+    (0.15, 1.7),
+    (0.70, 2.7),
+    (4.0, 3.9),
+    (15.0, 4.9),
+    (30.0, 5.0),
+]
 II_CUTS = [(45.0, 5), (28.0, 4), (14.0, 3), (7.0, 2), (0.0, 1)]
 ELO_FRONTIER = 1300.0  # design-arena ELO only used to lift, never to downgrade
 PARAMS_CUTS_MODERN = [(300.0, 5), (67.0, 4), (13.0, 3), (3.0, 2), (0.0, 1)]
@@ -70,36 +77,77 @@ PARAMS_CUTS_LEGACY = [(300.0, 4), (70.0, 3), (7.0, 2), (0.0, 1)]
 # vendors whose models have public parameter counts and commodity hosting,
 # where price reflects the hoster not the capability
 OPEN_PARAMS_VENDORS = {
-    "meta", "mistral", "alibaba", "google", "microsoft", "deepseek", "tii",
-    "ai2", "mosaic", "nvidia", "huggingface", "nous", "01-ai", "shanghai-ai-lab",
-    "lg-ai", "databricks", "upstage", "laion", "berkeley", "01-ai",
+    "meta",
+    "mistral",
+    "alibaba",
+    "google",
+    "microsoft",
+    "deepseek",
+    "tii",
+    "ai2",
+    "mosaic",
+    "nvidia",
+    "huggingface",
+    "nous",
+    "01-ai",
+    "shanghai-ai-lab",
+    "lg-ai",
+    "databricks",
+    "upstage",
+    "laion",
+    "berkeley",
+    "01-ai",
 }
 
 # absolute-capability era windows (see build_report for calibration notes)
-ERA_PRE_FRONTIER = dt.date(2023, 3, 15)   # before gpt-4: everything ~ tier 2
-ERA_CAP_4_END = dt.date(2024, 9, 1)       # before o1: nothing is tier 5
-ERA_MODERN = dt.date(2025, 1, 1)          # before this, today's intelligence
-                                          # index is not a fair downgrade signal
+ERA_PRE_FRONTIER = dt.date(2023, 3, 15)  # before gpt-4: everything ~ tier 2
+ERA_CAP_4_END = dt.date(2024, 9, 1)  # before o1: nothing is tier 5
+ERA_MODERN = dt.date(2025, 1, 1)  # before this, today's intelligence
+# index is not a fair downgrade signal
 
-TINY_WORDS = re.compile(r"\b(?:tiny|mini|micro|nano|slim|small|lite|flash|instant|1b|2b|3b|4b|5b|6b|7b|8b|9b)\b|-(?:1|2|3)b\b")
+TINY_WORDS = re.compile(
+    r"\b(?:tiny|mini|micro|nano|slim|small|lite|flash|instant|1b|2b|3b|4b|5b|6b|7b|8b|9b)\b|-(?:1|2|3)b\b"
+)
 HUGE_WORDS = re.compile(r"\b(?:opus|ultra|max|large|405b|671b|200b| frontier)\b")
 
 VENDOR_PATTERNS = [
-    (r"claude", "anthropic"), (r"\bgpt|davinci|babbage|chatgpt|\bo[134](?:-|$)|gpt-oss", "openai"),
-    (r"gemini|gemma|palm|bard|maddison", "google"), (r"llama|vicuna|guanaco|alpaca", "meta"),
+    (r"claude", "anthropic"),
+    (r"\bgpt|davinci|babbage|chatgpt|\bo[134](?:-|$)|gpt-oss", "openai"),
+    (r"gemini|gemma|palm|bard|maddison", "google"),
+    (r"llama|vicuna|guanaco|alpaca", "meta"),
     (r"mistral|mixtral|ministral|codestral|magistral|pixtral|devstral", "mistral"),
-    (r"qwen|qwq", "alibaba"), (r"deepseek", "deepseek"), (r"command\b|command-", "cohere"),
-    (r"glm|chatglm", "zhipu"), (r"kimi|moonshot", "moonshot"), (r"ernie", "baidu"),
-    (r"falcon", "tii"), (r"\bmpt\b", "mosaic"), (r"\bphi-\d", "microsoft"),
-    (r"\byi-\d", "01-ai"), (r"internlm", "shanghai-ai-lab"), (r"\bnova\b|titan\b", "amazon"),
-    (r"jamba|\bj2\b", "ai21"), (r"dbrx|dolly", "databricks"), (r"grok", "xai"),
-    (r"olmo", "ai2"), (r"nemotron", "nvidia"), (r"hermes|openhermes|nous-", "nous"),
-    (r"zephyr|starcoder|starchat|santacoder", "huggingface"), (r"\bsolar\b", "upstage"),
-    (r"exaone", "lg-ai"), (r"reka", "reka"), (r"oasst|pythia", "laion"),
-    (r"koala", "berkeley"), (r"wizardlm|wizardcoder", "microsoft"),
-    (r"\bairoboros", "jondurbin"), (r"\btoppy\b", "jebcarter"),
-    (r"\batlas\b", "intellignosis"), (r"rwkv", "rwkv"), (r"fastchat", "lmsys"),
-    (r"gpt4all", "nomic-ai"), (r"stablelm|stable-code", "stability-ai"),
+    (r"qwen|qwq", "alibaba"),
+    (r"deepseek", "deepseek"),
+    (r"command\b|command-", "cohere"),
+    (r"glm|chatglm", "zhipu"),
+    (r"kimi|moonshot", "moonshot"),
+    (r"ernie", "baidu"),
+    (r"falcon", "tii"),
+    (r"\bmpt\b", "mosaic"),
+    (r"\bphi-\d", "microsoft"),
+    (r"\byi-\d", "01-ai"),
+    (r"internlm", "shanghai-ai-lab"),
+    (r"\bnova\b|titan\b", "amazon"),
+    (r"jamba|\bj2\b", "ai21"),
+    (r"dbrx|dolly", "databricks"),
+    (r"grok", "xai"),
+    (r"olmo", "ai2"),
+    (r"nemotron", "nvidia"),
+    (r"hermes|openhermes|nous-", "nous"),
+    (r"zephyr|starcoder|starchat|santacoder", "huggingface"),
+    (r"\bsolar\b", "upstage"),
+    (r"exaone", "lg-ai"),
+    (r"reka", "reka"),
+    (r"oasst|pythia", "laion"),
+    (r"koala", "berkeley"),
+    (r"wizardlm|wizardcoder", "microsoft"),
+    (r"\bairoboros", "jondurbin"),
+    (r"\btoppy\b", "jebcarter"),
+    (r"\batlas\b", "intellignosis"),
+    (r"rwkv", "rwkv"),
+    (r"fastchat", "lmsys"),
+    (r"gpt4all", "nomic-ai"),
+    (r"stablelm|stable-code", "stability-ai"),
 ]
 
 
@@ -112,7 +160,9 @@ def fetch(name: str, url: str, refresh: bool) -> Path:
     if refresh or not path.exists():
         CACHE.mkdir(parents=True, exist_ok=True)
         log(f"fetching {name} ...")
-        req = urllib.request.Request(url, headers={"User-Agent": "llm-router-registry/1.0"})
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "llm-router-registry/1.0"}
+        )
         with urllib.request.urlopen(req, timeout=120) as r:
             path.write_bytes(r.read())
     return path
@@ -162,16 +212,42 @@ def params_from_name(name_norm: str) -> float | None:
 
 # ---------------------------------------------------------------- record loading
 
-class Rec:
-    __slots__ = ("raw", "source", "name", "vendor_hint", "pin", "pout", "released",
-                 "ii", "elo", "params_b", "context")
 
-    def __init__(self, raw: str, source: str, name: str, vendor_hint: str | None = None,
-                 pin: float | None = None, pout: float | None = None,
-                 released: str | None = None, ii: float | None = None,
-                 elo: float | None = None, params_b: float | None = None,
-                 context: int | None = None):
-        self.raw, self.source, self.name, self.vendor_hint = raw, source, name, vendor_hint
+class Rec:
+    __slots__ = (
+        "raw",
+        "source",
+        "name",
+        "vendor_hint",
+        "pin",
+        "pout",
+        "released",
+        "ii",
+        "elo",
+        "params_b",
+        "context",
+    )
+
+    def __init__(
+        self,
+        raw: str,
+        source: str,
+        name: str,
+        vendor_hint: str | None = None,
+        pin: float | None = None,
+        pout: float | None = None,
+        released: str | None = None,
+        ii: float | None = None,
+        elo: float | None = None,
+        params_b: float | None = None,
+        context: int | None = None,
+    ):
+        self.raw, self.source, self.name, self.vendor_hint = (
+            raw,
+            source,
+            name,
+            vendor_hint,
+        )
         self.pin, self.pout, self.released = pin, pout, released
         self.ii, self.elo, self.params_b, self.context = ii, elo, params_b, context
 
@@ -198,12 +274,16 @@ def load_litellm() -> list[Rec]:
             continue
         if key.endswith("/"):  # entry-point placeholders
             continue
-        recs.append(Rec(
-            raw=key, source="litellm", name=normalize_name(key),
-            pin=per_m(v.get("input_cost_per_token")),
-            pout=per_m(v.get("output_cost_per_token")),
-            context=v.get("max_input_tokens") or v.get("max_tokens"),
-        ))
+        recs.append(
+            Rec(
+                raw=key,
+                source="litellm",
+                name=normalize_name(key),
+                pin=per_m(v.get("input_cost_per_token")),
+                pout=per_m(v.get("output_cost_per_token")),
+                context=v.get("max_input_tokens") or v.get("max_tokens"),
+            )
+        )
     return recs
 
 
@@ -217,15 +297,24 @@ def load_openrouter() -> list[Rec]:
         da = bench.get("design_arena") or []
         elos = [d["elo"] for d in da if isinstance(d, dict) and d.get("elo")]
         created = v.get("created")
-        released = dt.datetime.fromtimestamp(created, dt.UTC).date().isoformat() if created else None
-        recs.append(Rec(
-            raw=v["id"], source="openrouter", name=normalize_name(v["id"]),
-            pin=per_m(pricing.get("prompt")), pout=per_m(pricing.get("completion")),
-            released=released,
-            ii=aa.get("intelligence_index"),
-            elo=sum(elos) / len(elos) if elos else None,
-            context=v.get("context_length"),
-        ))
+        released = (
+            dt.datetime.fromtimestamp(created, dt.UTC).date().isoformat()
+            if created
+            else None
+        )
+        recs.append(
+            Rec(
+                raw=v["id"],
+                source="openrouter",
+                name=normalize_name(v["id"]),
+                pin=per_m(pricing.get("prompt")),
+                pout=per_m(pricing.get("completion")),
+                released=released,
+                ii=aa.get("intelligence_index"),
+                elo=sum(elos) / len(elos) if elos else None,
+                context=v.get("context_length"),
+            )
+        )
     return recs
 
 
@@ -238,13 +327,27 @@ def load_modelsdev() -> list[Rec]:
             if modalities.get("output") and "text" not in modalities["output"]:
                 continue  # image/audio/embedding models are not routed chat models
             cost = m.get("cost") or {}
-            pin = cost.get("input") if isinstance(cost.get("input"), (int, float)) else None
-            pout = cost.get("output") if isinstance(cost.get("output"), (int, float)) else None
-            recs.append(Rec(
-                raw=f"{provider}/{key}", source="models.dev",
-                name=normalize_name(key), vendor_hint=provider,
-                pin=pin, pout=pout, released=m.get("release_date"),
-            ))
+            pin = (
+                cost.get("input")
+                if isinstance(cost.get("input"), (int, float))
+                else None
+            )
+            pout = (
+                cost.get("output")
+                if isinstance(cost.get("output"), (int, float))
+                else None
+            )
+            recs.append(
+                Rec(
+                    raw=f"{provider}/{key}",
+                    source="models.dev",
+                    name=normalize_name(key),
+                    vendor_hint=provider,
+                    pin=pin,
+                    pout=pout,
+                    released=m.get("release_date"),
+                )
+            )
     return recs
 
 
@@ -275,6 +378,7 @@ def load_epoch() -> dict[str, dict[str, Any]]:
 
 # ---------------------------------------------------------------- canonicalization
 
+
 class Canonical:
     __slots__ = ("key", "aliases", "raws", "fields")
 
@@ -285,13 +389,19 @@ class Canonical:
         self.fields: dict[str, Any] = {}
 
 
-def merge_records(recs: list[Rec], epoch: dict[str, dict[str, Any]]) -> dict[str, Canonical]:
+def merge_records(
+    recs: list[Rec], epoch: dict[str, dict[str, Any]]
+) -> dict[str, Canonical]:
     groups: dict[str, Canonical] = {}
     for r in recs:
         if not r.name or len(r.name) < 2:
             continue
         # hand aliases and vendor-prefixed names are already canonical keys
-        key = r.name if "/" in r.name else f"{infer_vendor(r.name, r.vendor_hint)}/{r.name}"
+        key = (
+            r.name
+            if "/" in r.name
+            else f"{infer_vendor(r.name, r.vendor_hint)}/{r.name}"
+        )
         g = groups.setdefault(key, Canonical(key))
         g.aliases.add(r.raw.lower())
         g.aliases.add(r.name)
@@ -305,7 +415,9 @@ def merge_records(recs: list[Rec], epoch: dict[str, dict[str, Any]]) -> dict[str
                 cur = f.get(field)
                 # models.dev release dates beat openrouter listing dates
                 if field == "released":
-                    if cur is None or (r.source == "models.dev" and cur[0] != "models.dev"):
+                    if cur is None or (
+                        r.source == "models.dev" and cur[0] != "models.dev"
+                    ):
                         f[field] = (r.source, val)
                 elif cur is None:
                     f[field] = val
@@ -323,6 +435,7 @@ def merge_records(recs: list[Rec], epoch: dict[str, dict[str, Any]]) -> dict[str
 
 
 # ---------------------------------------------------------------- scoring
+
 
 def interp_price(pin: float | None, pout: float | None) -> float | None:
     if pin is None and pout is None:
@@ -387,7 +500,9 @@ def score_group(g: Canonical) -> dict[str, Any] | None:
 
     params_b = f.get("params_b")
     legacy = era is not None and era < dt.date(2024, 9, 1)
-    params_tier = cut_tier(params_b, PARAMS_CUTS_LEGACY if legacy else PARAMS_CUTS_MODERN)
+    params_tier = cut_tier(
+        params_b, PARAMS_CUTS_LEGACY if legacy else PARAMS_CUTS_MODERN
+    )
 
     nm = g.key.split("/", 1)[1]
     vendor = g.key.split("/", 1)[0]
@@ -399,7 +514,9 @@ def score_group(g: Canonical) -> dict[str, Any] | None:
     base_tier: int
     pre_frontier = era is not None and era < ERA_PRE_FRONTIER
     legacy_open = (
-        legacy and params_tier is not None and vendor in OPEN_PARAMS_VENDORS
+        legacy
+        and params_tier is not None
+        and vendor in OPEN_PARAMS_VENDORS
         and not pre_frontier
     )
     if pre_frontier and not nm.startswith("gpt-4"):
@@ -410,7 +527,9 @@ def score_group(g: Canonical) -> dict[str, Any] | None:
         base_tier, basis = params_tier, f"params({params_b:g}B, legacy open)"
     elif price_cont is not None:
         base_tier = max(1, min(5, int(price_cont + 0.5)))  # half-up
-        basis = f"price({pin:.2f}/{pout:.2f}$ per M)" if (pin or pout) else "price(free)"
+        basis = (
+            f"price({pin:.2f}/{pout:.2f}$ per M)" if (pin or pout) else "price(free)"
+        )
     elif params_tier is not None:
         base_tier, basis = params_tier, f"params({params_b:g}B)"
     elif tiny:
@@ -427,7 +546,12 @@ def score_group(g: Canonical) -> dict[str, Any] | None:
         diff = quality - base_tier
         if diff >= 2 or (diff == 1 and (quality == 5 or base_tier <= 2)):
             adj = 1
-        elif diff <= -2 and quality_ii is not None and era is not None and era >= ERA_MODERN:
+        elif (
+            diff <= -2
+            and quality_ii is not None
+            and era is not None
+            and era >= ERA_MODERN
+        ):
             adj = -1
     tier = base_tier + adj
 
@@ -445,7 +569,9 @@ def score_group(g: Canonical) -> dict[str, Any] | None:
     if price_cont is not None and basis.startswith("price"):
         score_cont = price_cont
     if adj:
-        score_cont = min(max(score_cont + adj * 0.5, float(tier) - 0.5), float(tier) + 0.5)
+        score_cont = min(
+            max(score_cont + adj * 0.5, float(tier) - 0.5), float(tier) + 0.5
+        )
     score_cont = min(max(score_cont, 1.0), 5.0)
 
     notes = []
@@ -455,7 +581,11 @@ def score_group(g: Canonical) -> dict[str, Any] | None:
         notes.append(f"quality adj {adj:+d} (ii={f.get('ii')}, elo={f.get('elo')})")
     if released is None and tier == 5:
         notes.append("tier 5 with no release date - review")
-    if price_cont is not None and quality is not None and abs(quality - round(price_cont)) >= 2:
+    if (
+        price_cont is not None
+        and quality is not None
+        and abs(quality - round(price_cont)) >= 2
+    ):
         notes.append("price/quality disagree >=2 tiers")
 
     return {
@@ -481,6 +611,7 @@ def score_group(g: Canonical) -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------- main
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -531,11 +662,20 @@ def main() -> None:
                 "mode": "chat",
                 "complexity": int(ov["complexity"]),
                 "score": float(ov.get("score", ov["complexity"])),
-                "signals": {k: ov.get(k) for k in
-                            ("price_in_per_m", "price_out_per_m", "elo",
-                             "intelligence_index", "params_b")},
+                "signals": {
+                    k: ov.get(k)
+                    for k in (
+                        "price_in_per_m",
+                        "price_out_per_m",
+                        "elo",
+                        "intelligence_index",
+                        "params_b",
+                    )
+                },
                 "basis": "override",
-                "notes": ov.get("notes", "created via override; absent from live catalogs"),
+                "notes": ov.get(
+                    "notes", "created via override; absent from live catalogs"
+                ),
                 "_quality": None,
                 "_raws": [],
             }
@@ -547,7 +687,9 @@ def main() -> None:
         if "aliases" in ov:
             entry["aliases"] = sorted(set(entry["aliases"]) | set(ov["aliases"]))
         if "signals" in ov:
-            entry["signals"].update({k: v for k, v in ov["signals"].items() if v is not None})
+            entry["signals"].update(
+                {k: v for k, v in ov["signals"].items() if v is not None}
+            )
         if entry["basis"] != "override":
             entry["basis"] = "override"
 
@@ -587,16 +729,24 @@ def main() -> None:
     with OUT_REPORT.open("w") as f:
         f.write("# registry build report\n\n")
         f.write(f"generated: {registry['generated_at']}\n\n")
-        f.write(f"models: {len(built)} | tier histogram: {dict(sorted(tier_hist.items()))}\n\n")
+        f.write(
+            f"models: {len(built)} | tier histogram: {dict(sorted(tier_hist.items()))}\n\n"
+        )
         f.write(f"alias collisions: {len(collisions)}\n")
         for c in collisions[:50]:
             f.write(f"- {c}\n")
-        f.write("\n## flagged for review (quality-adjusted, guessed, or era-capped)\n\n")
+        f.write(
+            "\n## flagged for review (quality-adjusted, guessed, or era-capped)\n\n"
+        )
         for e in flagged:
-            f.write(f"- **{e['complexity']}** {e['canonical_id']} | {e['basis']} | {e['notes']}\n")
+            f.write(
+                f"- **{e['complexity']}** {e['canonical_id']} | {e['basis']} | {e['notes']}\n"
+            )
         f.write("\n## sample by tier (spot check)\n\n")
         seen: dict[int, list[str]] = defaultdict(list)
-        for e in sorted(built, key=lambda x: -(x["signals"]["intelligence_index"] or 0)):
+        for e in sorted(
+            built, key=lambda x: -(x["signals"]["intelligence_index"] or 0)
+        ):
             if len(seen[e["complexity"]]) < 12:
                 seen[e["complexity"]].append(e["canonical_id"])
         for tier in sorted(seen):

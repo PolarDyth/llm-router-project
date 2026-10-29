@@ -13,16 +13,17 @@ Runs on **Apple Silicon (MPS)**, **NVIDIA GPUs (CUDA)**, and **AMD GPUs**
 ```
 data/model_registry/
   models.json                        # generated registry: canonical chat LLMs -> complexity 1-5 (checked in)
-  overrides.yaml                     # hand-maintained tier fixes + pruned 2023-era models (checked in)
+  overrides.yaml                     # hand-maintained tier fixes + created entries (checked in)
   cache/                             # gitignored: raw source catalogs
   build_report.md                    # gitignored: per-build disagreements + review list
 router/model_registry.py             # loader + resolve(name) -> entry, shared name normalization
 scripts/build_model_registry.py      # merges 4 catalogs, scores tiers, emits models.json
 scripts/audit_model_coverage.py      # % of a dataset's model names the registry resolves
-models/dynamic_router/final/         # trained cross-encoder (output)
+scripts/build_training_dataset.py    # builds the (prompt -> complexity) dataset from arena + RouterBench
 device_utils.py                      # shared accelerator detection
-scripts/ training/ notebooks/        # dataset builders + training entry point
-eval_reports/                        # gitignored: evaluation + coverage reports
+notebooks/train_router_colab.ipynb   # the only training environment (Colab T4)
+data/router_training_dataset.jsonl   # gitignored: generated training data
+eval_reports/                        # gitignored: coverage + build reports
 ```
 
 ## Model complexity registry
@@ -69,14 +70,15 @@ source catalogs), then re-audit any dataset the router will train on:
 
 ```bash
 python scripts/build_model_registry.py
-python scripts/audit_model_coverage.py                       # arena-human-preference-140k
+python scripts/audit_model_coverage.py --all                  # full training suite (4 arena sets + RouterBench)
+python scripts/audit_model_coverage.py                        # arena-human-preference-140k only
 python scripts/audit_model_coverage.py --dataset <hf_id>     # any dataset with model columns
 python scripts/audit_model_coverage.py --file data/foo.csv --columns model,model_id
 ```
 
-Coverage target is ≥ 99% of dataset rows; both arena datasets
-(`arena-human-preference-140k`, `lmsys-chatbot_arena_conversations`) audit at
-100%.
+Coverage target is ≥ 99% of rows per source. `lmsys/chatbot_arena_conversations`
+(33k) is gated on the Hub: accept its license on the dataset page and run
+`hf auth login` to include it.
 
 ## Setup
 
@@ -98,71 +100,81 @@ Coverage target is ≥ 99% of dataset rows; both arena datasets
    pip install -r requirements.txt
    ```
 
-Device detection happens automatically at startup (`cuda` → `mps` →
-`directml` → `cpu`) and the chosen device is printed. Every script accepts
-`--device` (train) or auto-detects (test) to force a specific one.
+Device detection (`cuda` → `mps` → `directml` → `cpu`) lives in
+`device_utils.py` and is shared by anything that runs on a local
+accelerator; DirectML loads lazily via importlib so it is never a hard
+dependency.
 
-## Usage
+## Training data
+
+`scripts/build_training_dataset.py` builds `data/router_training_dataset.jsonl`
+(gitignored, regenerable) from public datasets whose rows pair a **prompt
+with one or more model names** — each name is translated into a complexity
+tier via the registry, so every row becomes (prompt → how much model it
+needed). Battles cover mid-2023 → mid-2025, so the tier signal stays
+era-consistent with the registry.
+
+| source | rows | shape | label_kind |
+|---|---|---|---|
+| `lmarena-ai/arena-human-preference-140k` | ~140k battles | prompt + 2 models + human winner (CC-BY-4.0) | `winner_tier` |
+| `lmarena-ai/arena-human-preference-100k` | ~100k battles | " | `winner_tier` |
+| `lmarena-ai/arena-human-preference-55k` | ~55k battles | " (apache-2.0) | `winner_tier` |
+| `lmsys/chatbot_arena_conversations` | ~33k battles | " (CC-BY-NC-4.0, gated) | `winner_tier` |
+| `withmartian/routerbench` (0-shot) | ~30k prompts × 11 models | prompt + per-model quality + cost | `min_solving_tier` |
+
+Two label kinds:
+
+- **`winner_tier`** — the tier of the model that won the battle. Ties and
+  both-bad rows are kept with `label_tier: null` (they still carry
+  `tier_a`/`tier_b`).
+- **`min_solving_tier`** — RouterBench only: the cheapest tier whose best
+  model reaches the quality threshold (per-prompt best − ε, or
+  exact-correct when scores are binary). These prompts are exam-style
+  (MMLU, GSM8K, MBPP, …), so treat them as an auxiliary signal alongside
+  the organic arena prompts.
+
+Every row also keeps the raw ingredients (`tier_a`, `tier_b`, `winner` or
+`candidate_tiers`), so the notebook can choose any training objective —
+per-prompt tier classification, winner-vs-loser contrast — without
+rebuilding the data.
+
+`scripts/build_training_pairs.py` derives the training-ready form from that
+file (local, no network): one row per **(prompt, tier, outcome, source)**
+sample for pairwise training — the model learns whether a tier *wins,
+loses, or ties* on a prompt, then routes by scoring tiers 1–5 and taking
+the argmax. Decisive battles emit (winner tier, 1.0) + (loser tier, 0.0);
+ties/both-bad emit both tiers at 0.5; RouterBench emits its solving tiers
+at 1.0 and the rest at 0.0. Decisive same-tier battles are skipped (no
+complexity gradient; `--keep-same-tier` to include). `--max-pairs N` caps
+the output with a seeded, proportionally **stratified sample over
+(source, tier)** — never truncate the file by head, rows are ordered by
+source era.
 
 ```bash
-# 1. Put scraped OpenRouter profiles at data/model_profiles.json
-#    (schema: {"<org/model-id>": {"name": ..., "description": ...}})
-
-# 2. Build a training dataset (either one)
-python scripts/build_capability_dataset.py  # capability archetypes (default)
-python scripts/build_scrubbed_arena.py      # from lmarena-ai/arena-human-preference-140k
-
-# 3. Train (auto-picks the newest dataset CSV in data/)
-python training/train_router.py
-python training/train_router.py --epochs 5 --device cuda   # override anything
-# A --holdout-frac (default 5%) of unique prompts is held out for a
-# per-epoch validation loss.
-
-# 4. Try it
-python scripts/test_router.py "explain how airline pricing works"
-python scripts/test_router.py --interactive   # REPL: type prompts, get rankings
+python scripts/build_training_dataset.py                       # arena suite
+python scripts/build_training_dataset.py --sources arena,routerbench
+python scripts/build_training_dataset.py --limit 500           # smoke run
+python scripts/build_training_pairs.py                         # full: ~534k pairs
+python scripts/build_training_pairs.py --max-pairs 15000       # capped for quick training
 ```
 
-Training reproduces the original recipe (AdamW lr 2e-5, linear warmup 100
-steps, batch 32, 3 epochs) with a plain PyTorch loop so it runs identically
-on every accelerator above. See `python training/train_router.py --help` for
-all knobs.
+Gates: per-source model coverage must be ≥ 99% (unmapped names go to
+`overrides.yaml`, rebuild the registry, retry) and duplicate battles (same
+prompt + model pair) across releases are dropped. The build writes
+`eval_reports/training_dataset_report.md` — per-source counts, label-tier
+histograms, prompt-length stats; eyeball it after every build.
 
-## Testing the router
+## Training
 
-Three steps, all local (inference only — fine on a Mac):
-
-```bash
-# 1. Fetch today's OpenRouter catalog (the "current data" side):
-#    data/model_profiles_live.json + a diff vs the training snapshot
-python scripts/fetch_catalog.py
-
-# 2. Build the held-out eval sets (prompts guaranteed absent from training):
-#    data/eval/arena_holdout.jsonl (real battles) + current_bench.jsonl
-#    (hand-authored current-world prompts, eval_lib/current_bench.py)
-python scripts/build_eval_set.py
-
-# 3. Run the harness — writes eval_reports/<timestamp>/{report.md,details.csv,
-#    pairwise.csv,confusion.csv} and prints headline numbers (~2-3 min on MPS)
-python scripts/evaluate_router.py
-```
-
-What the harness measures:
-
-- **Pairwise** — real arena battles held out of training: does the winner's
-  description outscore the loser's? (The capability-trained checkpoint doesn't
-  optimize this signal; read it as a diagnostic floor.)
-- **Routing** — the current bench: does a top-ranked model's archetype match
-  the prompt's expected archetype? Compared across three description modes:
-  `raw` (OpenRouter blurb as-is), `scrubbed` (exactly the training pipeline),
-  and `enriched` (scrubbed + a name-free capability line built from live
-  metadata: context window, input modalities, tool/reasoning support, price
-  tier) — so every candidate is described in decent depth without leaking
-  brand names.
-- **Novelty** — same metrics restricted to models added to the catalog since
-  the training snapshot: descriptions the router has never seen.
-
-Point `--prompts any.jsonl` at your own prompts (optional `archetype` field
-per line adds them to the metrics). `scripts/test_router.py` uses the same
-catalog/mode machinery for ad-hoc routing (`--catalog live|snapshot`,
-`--mode raw|scrubbed|enriched`, marks models new since training with `NEW`).
+Training runs in **Colab (T4) only** — the local machine never trains.
+`notebooks/train_router_colab.ipynb` is self-contained: upload
+`data/router_training_pairs.jsonl` (built locally by
+`scripts/build_training_pairs.py --max-pairs 15000`), and it fine-tunes a
+MiniLM cross-encoder as a **pairwise tier scorer** — the model reads
+(prompt, tier) and predicts win/lose/tie, using only the `prompt`, `tier`
+and `outcome` fields (the `source` column is ignored). Routing = argmax
+over the five fixed tier descriptions (saved alongside the weights as
+`tier_texts.json`). Manual PyTorch loop, no `pin_memory`, DirectML loaded
+lazily — every accelerator path stays open. The retired cross-encoder
+training pipeline was removed from `training/` (recoverable from git
+history, `993610e`).
