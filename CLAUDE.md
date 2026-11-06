@@ -15,7 +15,8 @@ Each stage's *logic* lives in a `router/` module; the script is only its CLI.
 ```
 4 vendor catalogs → catalogs.py + scoring.py        → models.json   (tier per canonical model)
 models.json     → sources.py + dataset.py           → router_training_dataset.jsonl  (model names → tiers)
-dataset.jsonl   → pairs.py                          → router_training_pairs.jsonl    (prompt, tier, outcome)
+dataset.jsonl   → floor.py + contracts.py           → router_training_floor.jsonl    (prompt → capability floor)
+floor.jsonl     → pairs.py                          → router_training_pairs.jsonl    (prompt, tier, outcome)
 pairs.jsonl     → notebooks/train_router_colab.ipynb → models/complexity_router/final/
 checkpoint      → contracts.py + metrics.py         → scripts/eval_checkpoint.py     (local inference-only eval)
 ```
@@ -30,8 +31,14 @@ thing to know before changing anything:
 
 - Edit `overrides.yaml` / `HAND_ALIASES` / `normalize_name()` → the tier of
   already-labeled rows silently changes → rebuild registry, then
-  `audit_model_coverage.py --all`, then rebuild the dataset, then rebuild pairs.
-  Skipping the dataset rebuild leaves labels computed under old normalization.
+  `audit_model_coverage.py --all`, then rebuild the dataset, then re-run
+  `select_floor_dataset.py`, then rebuild pairs. Skipping the dataset rebuild
+  leaves labels computed under old normalization.
+  The floor stage is the one place that reads *both* a frozen file and the live
+  registry (it trusts `tier_a`/`tier_b` from the dataset file but re-reads
+  `score` from `models.json`), so it is where a stale upstream artifact first
+  produces wrong labels — which is why `select_floor_dataset.py` re-resolves a
+  sample of rows and refuses to proceed past `--tier-tolerance`.
 - `build_training_dataset.py` and `audit_model_coverage.py` both call
   `get_registry()`, which is `@lru_cache(maxsize=1)` on
   `data/model_registry/models.json` — a fresh process per build is what picks up
@@ -47,13 +54,23 @@ row. This is now the only dispatch site; before the restructure the pairs build
 inlined it twice (once per streaming pass), so the strata count and the emitted
 subset could disagree:
 
-- `candidate_tiers` is a list → `solving_tier_pairs()` (routerbench **and**
-  complexity_router): solving tiers at 1.0, other candidates at 0.0.
+- `candidate_tiers` is a list → `solving_tier_pairs()` (routerbench,
+  complexity_router, **and** capability_floor): solving tiers at 1.0, other
+  candidates at 0.0.
 - otherwise → `arena_pairs()` using `tier_a`/`tier_b`/`winner`.
 
 So a new dataset source must either emit one of those two shapes (complexity_router
-cheats by reusing the routerbench shape with `solving_tiers=[label_tier]`) or add a
-branch here. `label_kind` (`winner_tier` / `min_solving_tier` / `annotated_level`)
+and capability_floor both cheat by reusing the routerbench shape with
+`solving_tiers=[label_tier]`) or add a branch here. That reuse is why the floor
+stage costs nothing downstream: `solving_tier_pairs` copies `row["source"]`
+verbatim and `build_training_pairs.py` filters `--sources` on that string rather
+than on the Hub catalog, so a new source key needs no pairs-stage, metric-layer,
+`pos_weight`, or golden-manifest change — and `tests/golden/pairs_manifest.json`
+stays byte-valid because the fixture never mentions the new source. Two
+consequences to keep: never emit a floor row with a null `label_tier` (a
+`capability_floor` row missing `solving_tiers` still takes the solving branch and
+yields zero pairs, silently shrinking the set), and `solving_tier_pairs` ignores
+`PairFilter` entirely, so gap/tie flags do nothing to floor rows. `label_kind` (`winner_tier` / `min_solving_tier` / `annotated_level`)
 is provenance for humans and the notebook, not a dispatch key.
 
 The 99% coverage gate (`router/contracts.COVERAGE_TARGET`, enforced by
@@ -76,9 +93,16 @@ checkout to import:
 | constant | `router/contracts.py` | notebook cells 9/11/13 | `scripts/eval_checkpoint.py` |
 |---|---|---|---|
 | `TIER_TEXTS` (5 strings) | source of truth | re-declares (unavoidable) | read from the checkpoint's `tier_texts.json` |
-| `MAX_LEN = 256` | source of truth | re-declares | **imports it** |
+| `MAX_LEN = 512` | source of truth | re-declares | **imports it** |
 | `VAL_PROMPT_MOD = 20` | source of truth | `sha1(prompt) % 20 == 0` → val | **imports it** |
 | `num_labels=1` scalar head | — | `AutoModelForSequenceClassification` | must pass `num_labels=1` again (it is not saved in `config.json`) |
+
+`MAX_LEN` is a hardware limit, not a speed knob: 512 is exactly DeBERTa-v3's
+`max_position_embeddings`, so going higher means resizing the position embeddings
+and forfeiting the pretrained backbone that makes the fine-tune work; `tests/test_contracts.py`
+asserts each checkpoint's own ceiling is `>= MAX_LEN`. The tier text consumes ~15
+tokens of that budget, and 256 truncated 11.1% of `(prompt, tier_text)` pairs —
+disproportionately the long, hard prompts a router most needs to rank.
 
 `tests/test_contracts.py` parses the notebook JSON and `literal_eval`s its
 assignments, so notebook drift fails the suite instead of silently leaking
@@ -152,16 +176,24 @@ string. No `pin_memory` anywhere; the training loop is manual (no HF Trainer).
 
 ## Working state to not be surprised by
 
-`data/router_training_pairs.jsonl` on disk is deliberately source-restricted —
-20k rows, `complexity_router` only, exactly 4000 per tier, complete 5-tier
-groups per prompt — for the active single-source experiment. It is not a broken
-or truncated build; re-run `build_training_pairs.py --sources complexity_router`
-to reproduce it, or omit `--sources` for the merged file. The old `training/`
+`data/router_training_pairs.jsonl` on disk is now the **capability-floor core**:
+34,720 rows from `data/router_training_floor.jsonl` (6,944 prompts, complete
+5-tier groups, golds `{1:1500, 2:1500, 3:1500, 4:1500, 5:944}`), built by
+`build_training_pairs.py --in data/router_training_floor.jsonl --sources
+capability_floor`. Tier 5 is short because most of its points rest on `both_bad`,
+which the provenance cap limits to 60% of a tier — a deliberate quality bound, not
+a supply failure (3,276 labelable tier-5 prompts existed). The previous
+`complexity_router` file (20k rows, 4000 prompts, **zero** tier-5 golds) is
+regenerable with `--sources complexity_router`; the merged file needs no
+`--sources`. `data/router_floor_holdout.jsonl` (900 arena_140k-only prompts) and
+`data/router_floor_quarantine.jsonl` (3,018 self-contradictory prompts) are
+side outputs of the selection stage — the holdout is the temporal test set and
+must never be merged into training. The old `training/`
 directory and `scripts/test_router.py` are gone — `training/` survived only as
 orphaned bytecode of a deleted source, now removed; both live in git history
 (`git show 993610e:training/train_router.py`).
 
-There is a pytest suite now (`tests/`, 354 tests, ~6 s, no network) plus pyright;
+There is a pytest suite now (`tests/`, 453 tests, ~8 s, no network) plus pyright;
 there is still no linter. Validation is `.venv/bin/python -m pytest -q` and
 `.venv/bin/pyright router/ scripts/ tests/` (both must stay clean, `basic` mode
 per `pyrightconfig.json`), alongside the coverage audit, a `--limit 500` smoke
@@ -192,6 +224,8 @@ Quick ways to check one stage without touching the rest:
 .venv/bin/python scripts/build_model_registry.py --refresh        # re-download catalogs
 .venv/bin/python scripts/build_model_registry.py --out /tmp/m.json --report /tmp/r.md  # build elsewhere
 .venv/bin/python scripts/build_training_dataset.py --limit 500 --sources complexity_router
+.venv/bin/python scripts/select_floor_dataset.py --in tests/fixtures/dataset_sample.jsonl --per-tier 1 --skip-semantic-dedup --out /tmp/floor_smoke.jsonl --report /tmp/floor_smoke.md   # offline smoke, ~1 s
+.venv/bin/python scripts/probe_floor_signal.py --floor /tmp/floor_smoke.jsonl   # learnability gate (CPU, ~1 min on a real core)
 .venv/bin/python -c "from router.model_registry import get_registry as g; print(g().complexity('gpt-4-1106-preview'))"   # 4
 .venv/bin/python scripts/audit_model_coverage.py --file data/foo.csv --columns model,model_id
 ```

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -78,10 +79,28 @@ def load_pairs(path: Path) -> list[Triplet]:
     return rows
 
 
+def require_finite(values: list[float], checkpoint: Path) -> None:
+    """Refuse to score a diverged checkpoint.
+
+    NaN does not show up as NaN in the printed numbers: `max(d, key=d.get)` over
+    an all-NaN score dict returns the *first* inserted key (every comparison is
+    False), so routing accuracy silently degenerates to P(gold == tier 1) and
+    pairwise accuracy to 0.000 -- figures that read as "a weak model" instead of
+    "a broken artifact". The notebook guards the training path (load-time canary
+    plus the non-finite batch skip); this guards the inference path.
+    """
+    if not all(math.isfinite(v) for v in values):
+        raise SystemExit(
+            f"non-finite logits from {checkpoint}: this checkpoint is diverged "
+            f"(NaN/Inf weights). Its accuracy numbers are meaningless -- delete "
+            f"it and retrain."
+        )
+
+
 @torch.no_grad()
 def score_matrix(model: Any, tokenizer: Any, device: torch.device,
                  tier_texts: dict[int, str], prompts: list[str],
-                 batch_size: int) -> dict[str, dict[int, float]]:
+                 batch_size: int, checkpoint: Path) -> dict[str, dict[int, float]]:
     """Score every (prompt, tier) combo; batched forward passes."""
     input_ids: list[list[int]] = []
     attention_mask: list[list[int]] = []
@@ -100,17 +119,19 @@ def score_matrix(model: Any, tokenizer: Any, device: torch.device,
         padded = tokenizer.pad({"input_ids": chunk_ids,
                                 "attention_mask": chunk_mask},
                                return_tensors="pt").to(device)
-        logits = model(**padded).logits.squeeze(-1).cpu().tolist()
+        logits = [float(v) for v in model(**padded).logits.squeeze(-1).cpu().tolist()]
+        require_finite(logits, checkpoint)
         for (prompt, tier), value in zip(keys[start:start + batch_size], logits):
-            scores[prompt][tier] = float(value)
+            scores[prompt][tier] = value
     return scores
 
 
 def route_demo(model: Any, tokenizer: Any, device: torch.device,
-               tier_texts: dict[int, str]) -> None:
+               tier_texts: dict[int, str], checkpoint: Path) -> None:
     print("\ndemo routes (gold tier from the labeled data):")
     scores = score_matrix(model, tokenizer, device, tier_texts,
-                          [p for p, _g in DEMO_PROMPTS], batch_size=8)
+                          [p for p, _g in DEMO_PROMPTS], batch_size=8,
+                          checkpoint=checkpoint)
     for prompt, gold in DEMO_PROMPTS:
         logits = scores[prompt]
         ranked = sorted(logits.items(), key=lambda kv: -kv[1])
@@ -146,10 +167,22 @@ def main() -> None:
     print(f"checkpoint: {args.checkpoint} | device: {device} | "
           f"pairs: {len(rows)} from {args.pairs.name}")
 
+    # Load-time canary -- the notebook's guard, applied to the eval path: one
+    # forward pass before scoring thousands of pairs, so rejecting a diverged
+    # checkpoint costs one batch instead of a whole run.
+    with torch.no_grad():
+        probe = tokenizer("canary prompt", tier_texts[min(tier_texts)],
+                          truncation=True, max_length=MAX_LEN,
+                          return_tensors="pt").to(device)
+        require_finite(
+            [float(v) for v in model(**probe).logits.squeeze(-1).cpu().tolist()],
+            args.checkpoint)
+
     val = val_split(rows, VAL_PROMPT_MOD)
     by_prompt = group_by_prompt(val)
     val_scores = score_matrix(model, tokenizer, device, tier_texts,
-                              sorted(by_prompt), args.batch_size)
+                              sorted(by_prompt), args.batch_size,
+                              args.checkpoint)
     decisive, eval_pairs = metric_cohort(by_prompt)
     print(f"\nval split: {len(val)} rows / {len(by_prompt)} prompts "
           f"({len(decisive)} decisive, {eval_pairs} eval pairs)")
@@ -163,7 +196,8 @@ def main() -> None:
     if not args.skip_train:
         train_by = group_by_prompt(train_split(rows, VAL_PROMPT_MOD))
         train_scores = score_matrix(model, tokenizer, device, tier_texts,
-                                    sorted(train_by), args.batch_size)
+                                    sorted(train_by), args.batch_size,
+                                    args.checkpoint)
         print(f"train split diagnostic: {len(rows) - len(val)} rows / "
               f"{len(train_by)} prompts")
         print(f"  pairwise accuracy:  "
@@ -171,7 +205,7 @@ def main() -> None:
         print(f"  routing accuracy:   "
               f"{routing_accuracy(train_by, train_scores):.3f}")
 
-    route_demo(model, tokenizer, device, tier_texts)
+    route_demo(model, tokenizer, device, tier_texts, args.checkpoint)
 
 
 if __name__ == "__main__":

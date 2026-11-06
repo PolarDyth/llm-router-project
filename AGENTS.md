@@ -4,14 +4,23 @@
 
 A homebrew LLM router, pivoted (Oct 2026) to **complexity-based routing**:
 training data is labeled by translating every model name into a complexity
-tier 1–5 (absolute capability: Opus-class = 5, flash/mini = 1). Step 1 — the
-model registry — is done and committed. Step 2 — the (prompt → complexity)
-training dataset builder — is done too: `scripts/build_training_dataset.py`
-labels four LMArena battle releases + RouterBench through the resolver, plus
-the model-free `RowRed/ComplexityRouter` annotations. Next step: train on it
-in the Colab notebook (now fine-tuning `microsoft/deberta-v3-base`) and
-decide per the standing protocol — pairwise acc climbing toward 0.66–0.68 →
-scale up; flat → pivot the label source.
+tier 1–5 (absolute capability: Opus-class = 5, flash/mini = 1). Steps 1–2 (the
+model registry, the labeled dataset) are done. **The label those steps produced
+— `winner_tier`, the tier of whichever model won the human vote — is not a
+property of the prompt**, so it is being replaced: `router/floor.py` reads each
+battle as an interval on the prompt's capability floor (what sufficed, what did
+not), intersects them per prompt, quarantines self-contradictory prompts, and
+selects an era-balanced core that is exactly tier-balanced. Current core: 6,944
+prompts / 34,720 pairs with **all five tiers populated** — the
+`complexity_router` experiment could not label tier 5 at all.
+
+Next step: train that core in the Colab notebook (fine-tuning
+`microsoft/deberta-v3-base`) and decide per the standing protocol — but read
+`eval_reports/floor_probe.md` first. At bag-of-words capacity the era-balanced
+core transfers weakly out-of-era (0.202 accuracy against the holdout's own 0.333
+majority prior, with the arena release predictable from prompt text alone at
+0.622), so that probe is a floor on what DeBERTa can do, not a forecast, and the
+out-of-era number — not the in-era one — is the honest headline.
 
 ## Layout
 
@@ -41,6 +50,9 @@ script, it belongs in the stage module instead.
   `ModelRegistry`, so tests drive them with a dict-backed fake and no catalog
 - `router/pairs.py` — dataset row → `(prompt, tier, outcome)` pairs; the single
   row-shape dispatch, the filtering rules, and `allocate`
+- `router/floor.py` — the capability-floor rules: battle → interval, per-prompt
+  intersection + contradiction quarantine, era-balanced (water-filling) quota
+  selection, near-duplicate clustering. Owns what a tier claim *means* now
 - `router/metrics.py` — eval math: prompt-hash split, cohorts,
   pairwise/routing accuracy, majority baseline
 - `router/devices.py` — cross-platform device selection (was root
@@ -57,20 +69,34 @@ script, it belongs in the stage module instead.
   families; hard-fails below 99% coverage per source that resolved model names
   (exemption is derived from whether names were resolved, not from a
   hardcoded source list — this previously exempted RouterBench by mistake)
+- `scripts/select_floor_dataset.py` — CLI: reads the **already-built** dataset
+  file (no Hub downloads) and writes `data/router_training_floor.jsonl` — one row
+  per selected prompt in the solving shape, plus the quarantine and temporal
+  holdout files and `eval_reports/floor_selection_report.md`. Runs a
+  registry-consistency tripwire (frozen `tier_a`/`tier_b` vs live registry) and
+  refuses to select from a dataset file that predates a registry rebuild
+- `scripts/probe_floor_signal.py` — CLI: the pre-training gate. TF-IDF + logistic
+  regression over the selected core: same-era CV, out-of-era transfer against the
+  **holdout's own** majority prior, single-vote vs corroborated recall, and how
+  predictable the release is from prompt text alone. Offline, CPU, ~1 minute
 - `scripts/build_training_pairs.py` — CLI: derives
   `data/router_training_pairs.jsonl` (gitignored) locally in two streaming
   passes over the dataset; `--max-pairs` applies a seeded stratified
   (source, tier) sample; `--sources` restricts which sources contribute —
-  the on-disk file is currently complexity_router-only (20k pairs, complete
-  5-tier groups per prompt) for the active experiment; omit the flag for the
-  merged file (~244k pairs under the gap filter)
+  the on-disk file is currently the capability_floor core (~34.7k pairs,
+  complete 5-tier groups per prompt); omit the flag for the merged file
+  (~244k pairs under the gap filter). **Never pass `--max-pairs` for a
+  floor file**: it samples pair *rows* per (source, tier) stratum, which
+  severs prompts from their 5-tier groups and leaves rows with no gold
 - `scripts/eval_checkpoint.py` — local inference-only eval of a
   Colab-trained checkpoint
-- `tests/` — pytest suite (354 tests, ~6 s, no network): the scoring
+- `tests/` — pytest suite (453 tests, ~8 s, no network): the scoring
   invariants, the row rules, the coverage gate, the dataset adapters driven
-  against faked catalogs, the notebook↔repo contract, and
-  `tests/test_no_duplication.py` which fails if a shared rule gets re-copied
-  anywhere in the tracked tree
+  against faked catalogs, the capability-floor interval rules and balanced
+  selection (`test_floor.py`) plus the selector CLI's stage contract, registry
+  tripwire and holdout exclusivity (`test_floor_cli.py`), the notebook↔repo
+  contract, and `tests/test_no_duplication.py` which fails if a shared rule gets
+  re-copied anywhere in the tracked tree
 - `tests/fixtures/dataset_sample.jsonl` — 600 real dataset rows (120 from each
   of the five redistributable sources, both row shapes, all three label kinds)
   and `tests/golden/pairs_manifest.json` — byte-fingerprints of 7 pairs builds
@@ -97,7 +123,9 @@ script, it belongs in the stage module instead.
 .venv/bin/python scripts/build_model_registry.py [--refresh]   # regenerate models.json
 .venv/bin/python scripts/audit_model_coverage.py --all         # audit the full training suite
 .venv/bin/python scripts/build_training_dataset.py --sources arena,routerbench,complexity_router
-.venv/bin/python scripts/build_training_pairs.py --sources complexity_router
+.venv/bin/python scripts/select_floor_dataset.py --per-tier 1500 --holdout-era arena_140k --holdout-per-tier 300
+.venv/bin/python scripts/build_training_pairs.py --in data/router_training_floor.jsonl --sources capability_floor
+.venv/bin/python scripts/probe_floor_signal.py                 # gate: read before a Colab session
 .venv/bin/python scripts/eval_checkpoint.py --skip-train       # local inference-only eval
 ```
 
@@ -139,6 +167,19 @@ runs offline against the committed fixture.
   `tests/fixtures/`, docs, or any tracked file — this repo has a GitHub remote.
   `tests/test_registry_rebuild.py::test_fixture_contains_no_rows_from_gated_sources`
   enforces it.
+- **Derived rows carry provenance, and that fixture guard cannot see it.** The
+  test checks a row's own `source` key, but a floor row's text can quote an
+  `arena_33k` battle (CC-BY-NC-4.0) while its `source` says `capability_floor`,
+  and it would sail straight through. Every floor row carries
+  `supporting_sources`; floor files stay gitignored, and anything from them that
+  needs to reach a tracked file must be filtered on that field first.
+- **A stage reading already-resolved rows is gated transitively and must not
+  claim a coverage gate.** `select_floor_dataset.py` re-reads a file whose model
+  names were resolved when it was written, so a coverage figure there could only
+  ever print 100% — and a gate that cannot fail reads as protection in this file
+  while protecting nothing. It runs a registry-consistency tripwire instead
+  (frozen `tier_a`/`tier_b` vs the live registry), which catches the failure that
+  is real: a dataset file that predates a registry rebuild.
 - **Registry layering**: scripts must import `normalize_name` from
   `router.model_registry`, never duplicate it. Alias resolution is
   HAND_ALIASES-first, so ambiguous marketing names ("gemini-pro") resolve to

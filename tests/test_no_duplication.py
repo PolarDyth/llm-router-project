@@ -106,6 +106,20 @@ SOLE_DEFINITION = {
     "is_validation": "router/metrics.py",
     "is_validation_prompt": "router/contracts.py",
     "select_device": "router/devices.py",
+    # The capability-floor rules. These are the dataset's semantics now, so a
+    # second copy anywhere (a script re-deriving an interval, a notebook
+    # restating the gates) would let the labels and the training data disagree
+    # about what a tier claim means -- the same failure the pairs goldens catch
+    # for the row rules.
+    "battle_constraint": "router/floor.py",
+    "constraint_rule": "router/floor.py",
+    "intersect": "router/floor.py",
+    "collapse": "router/floor.py",
+    "collect_intervals": "router/floor.py",
+    "norm_prompt": "router/floor.py",
+    "waterfill": "router/floor.py",
+    "select_balanced": "router/floor.py",
+    "floor_rows": "router/floor.py",
 }
 
 

@@ -27,9 +27,17 @@ TIER_TEXTS: dict[int, str] = {
     5: "complexity tier 5 - a top frontier model for the hardest tasks",
 }
 
-#: Prompts are truncated at this length. Enough signal to route on, and it keeps
-#: a DeBERTa-v3-base fine-tune fast on a Colab T4.
-MAX_LEN = 256
+#: Prompts are truncated at this length. 256 left 11.1% of labeled prompts
+#: tokenizing ``(prompt, tier_text)`` past the cut -- and the over-budget rows
+#: were disproportionately the long, hard ones -- so the budget is the backbone's
+#: ceiling rather than a speed knob.
+#:
+#: 512 IS that ceiling: DeBERTa-v3's ``max_position_embeddings`` is exactly 512,
+#: which is what ``tests/test_contracts.py`` asserts a checkpoint satisfies. Going
+#: above 512 is not a constant edit -- it needs the position embeddings resized,
+#: which invalidates the pretrained weights that make the fine-tune work at all.
+#: The tier text eats ~15 tokens of the budget, so the prompt itself gets ~497.
+MAX_LEN = 512
 
 #: Prompt-grouped validation split: sha1(prompt) % VAL_PROMPT_MOD == 0 -> val.
 #: Splitting on the prompt (not the row) is what keeps a prompt's winning and

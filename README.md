@@ -17,12 +17,13 @@ data/model_registry/
   cache/                             # gitignored: raw source catalogs
   build_report.md                    # gitignored: per-build disagreements + review list
 router/                              # the domain: one module per pipeline stage
-  contracts.py                       # (prompt, tier) interface: TIERS, TIER_TEXTS, MAX_LEN, VAL_PROMPT_MOD
+  contracts.py                       # (prompt, tier) interface: TIERS, TIER_TEXTS, MAX_LEN (512), VAL_PROMPT_MOD
   model_registry.py                  # loader + resolve(name) -> entry, shared name normalization
   catalogs.py                        # 4 vendor catalogs -> merged canonical groups
   scoring.py                         # groups -> complexity tier (price/quality/era rules, overrides)
   sources.py                         # the dataset source catalog, shared by audit + build
   dataset.py                         # source rows -> labeled dataset rows + the coverage gate
+  floor.py                           # battles -> capability-floor intervals -> balanced core
   pairs.py                           # dataset rows -> (prompt, tier, outcome) pairs
   metrics.py                         # prompt-hash split + pairwise/routing/majority math
   devices.py                         # cross-platform accelerator selection
@@ -30,6 +31,8 @@ scripts/                             # thin CLIs: args, stage ordering, markdown
   build_model_registry.py            # merges 4 catalogs, scores tiers, emits models.json
   audit_model_coverage.py            # % of a dataset's model names the registry resolves
   build_training_dataset.py          # builds the (prompt -> complexity) dataset
+  select_floor_dataset.py            # dataset -> balanced floor core + holdout + quarantine + report
+  probe_floor_signal.py              # pre-training gate: learnability + out-of-era transfer, CPU
   build_training_pairs.py            # derives the pairwise training file
   eval_checkpoint.py                 # local inference-only eval of a trained checkpoint
 tests/                               # pytest suite: stage rules, scoring invariants,
@@ -195,6 +198,26 @@ Every row also keeps the raw ingredients (`tier_a`, `tier_b`, `winner` or
 per-prompt tier classification, winner-vs-loser contrast — without
 rebuilding the data.
 
+`router/floor.py` (driven by `scripts/select_floor_dataset.py`) is the stage that
+decides what a tier label *means*, and it exists because `winner_tier` — the tier
+of whichever model won the human vote — is not a property of the prompt. It is
+bounded by the models an era fielded (arena_33k can only ever emit tiers 1, 2 or
+4; 32–44% of its battles have `tier_a == tier_b`, so the label is set entirely by
+the matchup), and prompts appearing in two releases disagree on it 31% of the
+time. A battle instead states what **sufficed** and what **did not**, which is an
+interval on the lowest tier that would do: a stronger winner gives
+`[loser+1, winner]`, an upset `[1, winner]`, a tie across a gap `[1, lower]`, and
+`both_bad` among capable models `[max+1, 5]` — the last of these is how tier 5
+becomes reachable at all. Same-tier battles contribute nothing. Intersecting a
+prompt's intervals either collapses to one tier (a label), stays wide (no label),
+or comes up **empty — a prompt whose own ballots contradict each other, which is
+quarantined** (2.3% of constrained prompts). Gates on the interval rules use the
+registry's continuous `score`, not just its tier buckets, so "decisive" means the
+combatants were genuinely different models. Selection then takes ~1,500 prompts
+per tier, spreading each tier across eras as evenly as supply allows (tiers 1–2
+have almost no 2025 supply, because weak models were not fielded there — balanced
+and era-clean are not jointly available from arena data).
+
 `router/pairs.py` (driven by `scripts/build_training_pairs.py`) derives the
 training-ready form from that file, locally and with no network: one row per
 **(prompt, tier, outcome, source)** sample for pairwise training — the model
@@ -213,11 +236,18 @@ and `--sources` restricts which sources contribute.
 python scripts/build_training_dataset.py                       # arena suite
 python scripts/build_training_dataset.py --sources arena,routerbench,complexity_router
 python scripts/build_training_dataset.py --limit 500           # smoke run
+python scripts/select_floor_dataset.py --per-tier 1500 --holdout-era arena_140k --holdout-per-tier 300
+python scripts/probe_floor_signal.py                           # read before a Colab session
+python scripts/build_training_pairs.py --in data/router_training_floor.jsonl --sources capability_floor  # the live experiment: 34,720
 python scripts/build_training_pairs.py                         # all sources: 554,352 pairs
 python scripts/build_training_pairs.py --min-tier-gap 2 --drop-ties  # the gap filter: 243,722
-python scripts/build_training_pairs.py --sources complexity_router   # the live experiment: 20,000
-python scripts/build_training_pairs.py --max-pairs 15000       # capped for quick training
+python scripts/build_training_pairs.py --sources complexity_router   # the previous experiment: 20,000
 ```
+
+Never pass `--max-pairs` for a floor file: `allocate` samples pair *rows* per
+`(source, tier)` stratum, which severs prompts from their complete 5-tier groups
+and leaves rows with no gold. Balance is enforced upstream, in the selection
+stage, where the label is decided.
 
 Gates: per-source model coverage must be ≥ 99% (unmapped names go to
 `overrides.yaml`, rebuild the registry, retry) and duplicate battles (same
@@ -248,9 +278,15 @@ is prompt-grouped (`sha1(prompt) % 20 == 0`) so a prompt's winning and losing
 tiers never straddle it.
 
 The metric that tracks progress is **pairwise accuracy** (gold tier scored above
-loser tier), currently the number to watch climb toward 0.66–0.68. Routing
-accuracy caps near the human label-agreement rate (~0.42) and must be read
-against the majority-tier baseline the notebook prints beside it.
+loser tier), against a **0.20 majority baseline** now that the golds are
+tier-balanced (it read ~0.33+ on the old skewed sets, which flattered every
+number beside it). Routing accuracy's earlier ~0.42 saturation was a property of
+`winner_tier`, whose label two battles on one prompt disagreed on ~58% of the
+time; floor labels contradict each other far less often and quarantine those
+prompts, so no measured ceiling applies — but 91.5% of arena prompts carry one
+battle, so the ceiling is *unmeasured* rather than high. `scripts/probe_floor_signal.py`
+reports single-vote vs corroborated recall, and its out-of-era transfer number is
+the one that predicts routing traffic; the in-era number is not.
 
 To re-check a checkpoint without training, `scripts/eval_checkpoint.py` runs
 batched inference only (safe on the Mac) and reproduces the notebook's split and
