@@ -36,7 +36,9 @@ script, it belongs in the stage module instead.
   therefore audited and coverage-gated. Also the RouterBench pkl column rules
 - `router/dataset.py` — dataset-stage adapters (`arena_rows`,
   `routerbench_rows`, `complexity_router_rows`) as generators, arena schema
-  normalization, and the `coverage_failures` gate
+  normalization, and the `coverage_failures` gate. Adapters take the
+  `NameResolver` protocol (only `.complexity(name)`), not a concrete
+  `ModelRegistry`, so tests drive them with a dict-backed fake and no catalog
 - `router/pairs.py` — dataset row → `(prompt, tier, outcome)` pairs; the single
   row-shape dispatch, the filtering rules, and `allocate`
 - `router/metrics.py` — eval math: prompt-hash split, cohorts,
@@ -64,9 +66,11 @@ script, it belongs in the stage module instead.
   merged file (~244k pairs under the gap filter)
 - `scripts/eval_checkpoint.py` — local inference-only eval of a
   Colab-trained checkpoint
-- `tests/` — pytest suite (299 tests, ~3 s): stage rules, the scoring
-  invariants, the notebook↔repo contract, and `tests/test_no_duplication.py`
-  which fails if a shared rule gets re-copied anywhere
+- `tests/` — pytest suite (354 tests, ~6 s, no network): the scoring
+  invariants, the row rules, the coverage gate, the dataset adapters driven
+  against faked catalogs, the notebook↔repo contract, and
+  `tests/test_no_duplication.py` which fails if a shared rule gets re-copied
+  anywhere in the tracked tree
 - `tests/fixtures/dataset_sample.jsonl` — 600 real dataset rows (120 from each
   of the five redistributable sources, both row shapes, all three label kinds)
   and `tests/golden/pairs_manifest.json` — byte-fingerprints of 7 pairs builds
@@ -86,7 +90,8 @@ script, it belongs in the stage module instead.
 ## Commands
 
 ```bash
-.venv/bin/pip install -e ".[dev]" --no-deps   # once: makes `router` importable
+.venv/bin/pip install -e . --no-deps          # once: makes `router` importable
+.venv/bin/pip install pytest                  # test-only; not in requirements.txt
 .venv/bin/python -m pytest -q                 # the whole suite, ~3 s, offline
 .venv/bin/pyright router/ scripts/ tests/     # must stay 0 errors / 0 warnings
 .venv/bin/python scripts/build_model_registry.py [--refresh]   # regenerate models.json
@@ -98,6 +103,9 @@ script, it belongs in the stage module instead.
 
 The scripts import `router` as an installed package — there is no `sys.path`
 patching anywhere, and `pip install -e .` is required before anything runs.
+`--no-deps` is what stops pip from re-resolving the accelerator-specific torch
+build; it also skips the `dev` extra, which is why pytest is a separate line and
+`pip install -e ".[dev]" --no-deps` would *not* install it.
 `--no-deps` keeps pip from re-resolving the carefully pinned torch build.
 
 `lmsys/chatbot_arena_conversations` (33k) is gated: accept its license on

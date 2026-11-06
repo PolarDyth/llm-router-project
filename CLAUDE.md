@@ -124,9 +124,13 @@ root-level `device_utils.py` this section used to describe had *zero* importers
 after the training script was retired; `eval_checkpoint.py` carried a divergent
 private copy instead. Both are gone.)
 
-`select_device` validates `--device` against `VALID_DEVICES` and exits with an
-install hint when a forced device is unavailable, where the old inline copy built
-`torch.device(anything)` and let it fail later. DirectML is always reached through
+`select_device` validates the device *name* in `--device` against `VALID_DEVICES`
+and the `:index` against the visible device count, exiting with an install hint
+when a forced device is unavailable — where the old inline copy built
+`torch.device(anything)` and let it fail later. Indexed forms (`cuda:1`,
+`mps:0`) must keep working: that grammar was accepted before the consolidation,
+so validating was allowed to add a clearer error and not a narrower input space.
+DirectML is always reached through
 `importlib` (never a static import) so it stays optional on platforms where it
 can't be installed, and callers pass the returned `torch.device` around as-is
 since the DirectML one is a `privateuseone` object that can't be rebuilt from a
@@ -157,7 +161,7 @@ directory and `scripts/test_router.py` are gone — `training/` survived only as
 orphaned bytecode of a deleted source, now removed; both live in git history
 (`git show 993610e:training/train_router.py`).
 
-There is a pytest suite now (`tests/`, 299 tests, ~3 s, no network) plus pyright;
+There is a pytest suite now (`tests/`, 354 tests, ~6 s, no network) plus pyright;
 there is still no linter. Validation is `.venv/bin/python -m pytest -q` and
 `.venv/bin/pyright router/ scripts/ tests/` (both must stay clean, `basic` mode
 per `pyrightconfig.json`), alongside the coverage audit, a `--limit 500` smoke
@@ -169,8 +173,18 @@ params invariants AGENTS.md says not to break silently; `test_contracts.py`
 parses the notebook and fails if its constants drift; `test_pairs_cli.py`
 byte-compares seven pairs builds against fingerprints captured before the
 restructure; `test_registry_rebuild.py` rebuilds `models.json` from the cached
-catalogs and requires it to match what is committed. Quick ways to check one
-stage without touching the rest:
+catalogs and requires it to match what is committed *as bytes* (key order
+included, since dict equality would not see it).
+
+The byte goldens cannot cover the dataset stage: it reads gated Hub datasets, so
+`test_dataset_adapters.py` drives all three adapters against faked
+`load_dataset` / `read_pickle` instead. That is where the rules that are not
+arithmetic get pinned — `name_slots` as the gate denominator, a prompt nobody
+solved staying null even when `best - epsilon` makes its own bar negative,
+`LEVEL_TO_TIER.get()` left default-less so a junk level cannot silently become
+mid-tier, and `emitted` incremented *before* each `yield` because the adapters
+are generators and a consumer that breaks early must still report the truth.
+Quick ways to check one stage without touching the rest:
 
 ```bash
 .venv/bin/python -m pytest -q                                     # everything

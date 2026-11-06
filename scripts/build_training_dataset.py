@@ -40,7 +40,8 @@ from router.dataset import (
     coverage_failures,
     routerbench_rows,
 )
-from router.model_registry import ModelRegistry, get_registry
+from router.dataset import NameResolver
+from router.model_registry import get_registry
 from router.sources import (
     FAMILY_ARENA,
     FAMILY_COMPLEXITY_ROUTER,
@@ -58,7 +59,7 @@ REPORT_PATH = ROOT / "eval_reports" / "training_dataset_report.md"
 
 def rows_for(
     src: Source,
-    registry: ModelRegistry,
+    registry: NameResolver,
     stats: SourceStats,
     seen: set[str],
     epsilon: float,

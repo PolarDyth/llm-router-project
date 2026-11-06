@@ -33,20 +33,22 @@ def _load_directml() -> ModuleType | None:
 
     importlib is used instead of a plain import so type checkers do not flag
     the package as missing on the platforms where it cannot be installed.
+    OSError is caught too: a half-installed torch-directml (present but unable
+    to load its native library) must degrade to "no DirectML", not abort a run.
     """
     try:
         return importlib.import_module("torch_directml")
-    except ImportError:
+    except (ImportError, OSError):
         return None
 
 
 def select_device(override: str | None = None) -> torch.device:
     """Pick the best available torch device, or return `override` if given.
 
-    Accepts "auto" (detect), "cuda", "mps", "directml" or "cpu". Returns a
-    torch.device — note that for DirectML this is a `privateuseone` device
-    object, which is why callers should pass it around as-is rather than
-    reconstructing it from a string.
+    Accepts "auto" (detect), "cuda", "mps", "directml" or "cpu", each with an
+    optional ":index" suffix. Returns a torch.device — note that for DirectML
+    this is a `privateuseone` device object, which is why callers should pass it
+    around as-is rather than reconstructing it from a string.
     """
     if override and override != "auto":
         return _resolve_override(override)
@@ -70,41 +72,73 @@ def select_device(override: str | None = None) -> torch.device:
 
 
 def _resolve_override(override: str) -> torch.device:
-    if override == "cuda":
+    """Resolve a forced --device value, with or without an accelerator index.
+
+    `cuda:1` and `mps:0` must keep working: the old inline copy accepted any
+    string through `torch.device(...)`, and validation was supposed to add a
+    clearer error, not a narrower grammar. Only the *name* is checked against
+    VALID_DEVICES; the index is checked against the device count.
+    """
+    name, _, index = override.partition(":")
+    index = index or None
+
+    if name == "cuda":
         if not torch.cuda.is_available():
             raise SystemExit(
                 "[device] --device cuda requested, but torch.cuda.is_available() "
                 "is False. If this is an AMD GPU, install a ROCm build of PyTorch "
                 "(see README.md)."
             )
-        print(f"[device] Using CUDA device (forced): {torch.cuda.get_device_name(0)}")
-        return torch.device("cuda")
+        _check_index(override, index, torch.cuda.device_count())
+        print(f"[device] Using CUDA device (forced): "
+              f"{torch.cuda.get_device_name(int(index) if index else 0)}")
+        return torch.device(override)
 
-    if override == "mps":
+    if name == "mps":
         if not torch.backends.mps.is_available():
             raise SystemExit(
                 "[device] --device mps requested, but MPS is not available "
                 "on this system."
             )
+        # MPS is single-device; torch only accepts mps or mps:0
+        _check_index(override, index, 1)
         print("[device] Using Apple Silicon MPS device (forced)")
-        return torch.device("mps")
+        return torch.device(override)
 
-    if override == "directml":
+    if name == "directml":
         directml = _load_directml()
         if directml is None:
             raise SystemExit(
                 "[device] --device directml requested, but torch-directml is "
                 "not installed. Run: pip install torch-directml"
             )
-        device = directml.device()
+        if index is None:
+            device = directml.device()
+        else:
+            _check_index(override, index, int(directml.device_count()))
+            device = directml.device(int(index))
         print(f"[device] Using DirectML device (forced): {directml.device_name(0)}")
         return device
 
-    if override == "cpu":
+    if name == "cpu":
         print("[device] Using CPU (forced)")
         return torch.device("cpu")
 
     raise SystemExit(
         f"[device] Unknown device '{override}'. Expected one of: "
-        + ", ".join(VALID_DEVICES)
+        + ", ".join(VALID_DEVICES) + " (an :index suffix is allowed)"
     )
+
+
+def _check_index(override: str, index: str | None, count: int) -> None:
+    if index is None:
+        return
+    try:
+        wanted = int(index)
+    except ValueError:
+        raise SystemExit(f"[device] Bad device index in '{override}'.") from None
+    if not 0 <= wanted < count:
+        raise SystemExit(
+            f"[device] '{override}' asks for index {wanted}, but only "
+            f"{count} such device(s) are visible."
+        )

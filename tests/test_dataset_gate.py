@@ -95,7 +95,8 @@ class TestGateIsStructuralNotANameList:
     def test_slots_are_what_switch_the_gate_on(self):
         named = _stats(50, {})
         free = SourceStats(scanned=50, emitted=50)
-        assert named.carries_model_names and not free.carries_model_names
+        # the gate's only input is whether a rate exists at all
+        assert named.coverage is not None and free.coverage is None
         assert coverage_failures({"a": named}) == []
         assert coverage_failures({"b": free}) == []
 

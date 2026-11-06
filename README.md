@@ -55,11 +55,18 @@ Tier scale:
 
 | Tier | Class | Examples |
 |---|---|---|
-| 1 | tiny/flash | gemma-2-9b, gemini-2.0-flash-lite, vicuna-7b |
-| 2 | light/mini | gpt-4o-mini, gemini-2.0-flash, claude-3-haiku, gpt-3.5-turbo |
-| 3 | mid/pro | llama-3.1-70b, deepseek-chat, gemini-1.0-pro, claude-2 |
-| 4 | pro / 2024-frontier | gpt-4o, claude-3-5-sonnet, o1-mini, gemini-1.5-pro |
+| 1 | tiny/flash | vicuna-7b, llama-3.2-1b, gemma-2-2b |
+| 2 | light/mini | gpt-4o-mini, gemini-2.0-flash, gemini-2.0-flash-lite, claude-3-haiku, mistral-tiny, gemma-2-9b |
+| 3 | mid/pro | llama-3.1-70b, deepseek-chat, gemini-1.0-pro, claude-2, o1-mini, claude-3-5-haiku |
+| 4 | pro / 2024-frontier | gpt-4o, claude-3-5-sonnet, gemini-1.5-pro, gpt-3.5-turbo |
 | 5 | frontier | o1, claude-opus-4, kimi-k3.1-pro, claude-opus-5.5 |
+
+Every example is literally what `registry.complexity(name)` returns, so the
+table is checkable rather than decorative. Two placements look wrong until you
+read the scoring rules: `o1-mini` lands on 3 because the tier is a blended-price
+prior, and `gpt-3.5-turbo` lands on 4 because the 2026 catalog still lists it at
+pro-class prices — absolute capability is approximated through what vendors
+charge for it, which is why `overrides.yaml` exists.
 
 Tiers are scored by `router/scoring.py` (invoked by
 `scripts/build_model_registry.py`): a log-price prior
@@ -125,14 +132,17 @@ Coverage target is ≥ 99% of rows per source that carries model names. `lmsys/c
    ```
 
 3. Install the `router` package in editable mode (required — the scripts import
-   it), with pytest for the test suite:
+   it), then pytest for the test suite:
 
    ```bash
-   pip install -e ".[dev]" --no-deps
+   pip install -e . --no-deps
+   pip install pytest
    ```
 
    `--no-deps` stops pip from re-resolving the accelerator-specific torch build
-   you picked in step 1.
+   you picked in step 1. It also skips the `dev` extra declared in
+   `pyproject.toml`, so pytest is a separate command — `pip install -e ".[dev]"
+   --no-deps` installs the package but *not* pytest.
 
 Device detection (`cuda` → `mps` → `directml` → `cpu`) lives in
 `router/devices.py` and is what every repo-local script imports; the Colab
@@ -175,8 +185,10 @@ Three label kinds:
   by Qwen3.5-4B, mapped linearly onto tiers 1–4 (`LEVEL_TO_TIER`), so nothing is
   resolved through the registry and the coverage gate does not apply. The row
   reuses the RouterBench shape with `solving_tiers=[label_tier]` — gold tier
-  wins, the other four lose. 813 rows are synthetic rewrites, flagged
-  `synthetic: true`. Tier 5 stays arena/RouterBench-only by construction.
+  wins, the other four lose. 600 rows are synthetic frontier rewrites, flagged
+  `synthetic: true` (that is the count of `original_message_id ==
+  "Level0_to_Level3"`; the 813 that appears elsewhere is the level-3 *count*, a
+  different thing). Tier 5 stays arena/RouterBench-only by construction.
 
 Every row also keeps the raw ingredients (`tier_a`, `tier_b`, `winner` or
 `candidate_tiers`), so the notebook can choose any training objective —

@@ -44,6 +44,11 @@ class Source:
     name_mode: str
     model_columns: tuple[str, ...] = ()
     note: str = ""
+    #: Rows may not be checked into this repo (or otherwise redistributed) —
+    #: access requires accepting terms on the Hub, and the license is not a
+    #: redistribution right. Build them locally into the gitignored data files
+    #: only. `tests/test_registry_rebuild.py` enforces this for the fixture.
+    gated: bool = False
 
     @property
     def carries_model_names(self) -> bool:
@@ -53,11 +58,11 @@ class Source:
 
 
 ARENA_HF_IDS = (
-    ("arena_33k", "lmsys/chatbot_arena_conversations", "2023 Chatbot Arena"),
+    ("arena_33k", "lmsys/chatbot_arena_conversations", "2023 Chatbot Arena", True),
     ("arena_55k", "lmarena-ai/arena-human-preference-55k",
-     "2023-24 LMArena battles (csv, flat prompt)"),
-    ("arena_100k", "lmarena-ai/arena-human-preference-100k", "2024 LMArena battles"),
-    ("arena_140k", "lmarena-ai/arena-human-preference-140k", "2025 LMArena battles"),
+     "2023-24 LMArena battles (csv, flat prompt)", False),
+    ("arena_100k", "lmarena-ai/arena-human-preference-100k", "2024 LMArena battles", False),
+    ("arena_140k", "lmarena-ai/arena-human-preference-140k", "2025 LMArena battles", False),
 )
 
 ROUTERBENCH_HF = "withmartian/routerbench"
@@ -67,8 +72,8 @@ COMPLEXITY_ROUTER_HF = "RowRed/ComplexityRouter"
 SOURCES: tuple[Source, ...] = (
     *(
         Source(key, FAMILY_ARENA, hf_id, LABEL_KIND_WINNER_TIER, NAME_MODE_COLUMNS,
-               ("model_a", "model_b"), note)
-        for key, hf_id, note in ARENA_HF_IDS
+               ("model_a", "model_b"), note, gated)
+        for key, hf_id, note, gated in ARENA_HF_IDS
     ),
     Source("routerbench", FAMILY_ROUTERBENCH, ROUTERBENCH_HF,
            LABEL_KIND_MIN_SOLVING_TIER, NAME_MODE_PKL_MODEL_COLUMNS, (),
@@ -82,6 +87,9 @@ _BY_KEY: dict[str, Source] = {s.key: s for s in SOURCES}
 
 #: Every source's labels were produced through the registry resolver.
 AUDITABLE: tuple[Source, ...] = tuple(s for s in SOURCES if s.carries_model_names)
+
+#: Source keys whose rows must never be committed or redistributed.
+GATED: frozenset[str] = frozenset(s.key for s in SOURCES if s.gated)
 
 
 def by_key(key: str) -> Source:

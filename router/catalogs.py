@@ -228,9 +228,14 @@ class CatalogCache:
     def path(self, name: str) -> Path:
         return self.root / name
 
-    def refresh(self, urls: dict[str, str] = VENDOR_CATALOGS, force: bool = False) -> None:
-        """Download any catalog not already cached (or all of them with force)."""
-        for name, url in urls.items():
+    def refresh(self, urls: dict[str, str] | None = None,
+                force: bool = False) -> None:
+        """Download any catalog not already cached (or all of them with force).
+
+        `urls` defaults to None rather than to the module dict, so a caller can
+        never mutate `VENDOR_CATALOGS` through a shared default argument.
+        """
+        for name, url in (urls or VENDOR_CATALOGS).items():
             path = self.path(name)
             if force or not path.exists():
                 self.root.mkdir(parents=True, exist_ok=True)

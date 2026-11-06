@@ -173,20 +173,44 @@ class TestMajorityBaseline:
 
 
 class TestRealPairsShape:
-    def test_complete_five_tier_prompts_are_the_decisive_cohort(self, dataset_sample):
-        """The on-disk experiment file emits complete 5-tier groups per prompt;
-        the metrics must treat each as one decisive cohort."""
-        from router.pairs import PairFilter, PairStats, pairs_from_row
+    def test_model_free_rows_form_complete_decisive_cohorts(self, dataset_sample):
+        """complexity_router emits a complete 5-tier group with exactly one gold
+        per prompt, so every such prompt is decisive and contributes 4 eval
+        pairs -- and routing accuracy is then defined on all of them."""
         import json
 
-        rows = []
-        stats = PairStats()
-        for line in dataset_sample.read_text().splitlines():
-            if not line.strip():
-                continue
-            for p in pairs_from_row(json.loads(line), PairFilter(), stats):
-                rows.append((p.prompt, p.tier, p.outcome))
+        from router.pairs import PairFilter, PairStats, pairs_from_row
+
+        rows = [
+            (p.prompt, p.tier, p.outcome)
+            for line in dataset_sample.read_text().splitlines() if line.strip()
+            for row in [json.loads(line)] if row["source"] == "complexity_router"
+            for p in pairs_from_row(row, PairFilter(), PairStats())
+        ]
         grouped = group_by_prompt(rows)
+        assert grouped, "fixture has no complexity_router rows"
+        assert all(sorted(t) == [1, 2, 3, 4, 5] for t in grouped.values())
         decisive, pairs = metric_cohort(grouped)
+        assert sorted(decisive) == sorted(grouped)
+        assert pairs == 4 * len(grouped)
+        assert len(gold_tiers(grouped)) == len(grouped)
+        assert routing_accuracy(grouped, {
+            p: {t: (9.0 if o == 1.0 else 1.0) for t, o in tiers.items()}
+            for p, tiers in grouped.items()
+        }) == 1.0
+
+    def test_the_two_cohort_helpers_agree_on_real_data(self, dataset_sample):
+        """metric_cohort and gold_tiers filter the same way independently; if one
+        is edited the two must not silently disagree about the denominator."""
+        import json
+
+        from router.pairs import PairFilter, PairStats, pairs_from_row
+
+        rows = [
+            (p.prompt, p.tier, p.outcome)
+            for line in dataset_sample.read_text().splitlines() if line.strip()
+            for p in pairs_from_row(json.loads(line), PairFilter(), PairStats())
+        ]
+        grouped = group_by_prompt(rows)
+        decisive, _pairs = metric_cohort(grouped)
         assert len(decisive) == len(gold_tiers(grouped))
-        assert majority_baseline(grouped) is not None

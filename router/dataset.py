@@ -30,10 +30,9 @@ import json
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from router.contracts import COVERAGE_TARGET
-from router.model_registry import ModelRegistry
 from router.sources import (
     COMPLEXITY_ROUTER_HF,
     ROUTERBENCH_FILE,
@@ -47,6 +46,18 @@ from router.sources import (
 # signal and the synthetic rewrites ("frontier needed") stop short of it.
 LEVEL_TO_TIER = {0: 1, 1: 2, 2: 3, 3: 4}
 COMPLEXITY_ROUTER_SYNTHETIC_ID = "Level0_to_Level3"  # id marker of rewrites
+
+
+class NameResolver(Protocol):
+    """What the adapters need of a registry: raw model name -> complexity tier.
+
+    Declaring the narrow capability instead of taking a concrete `ModelRegistry`
+    is what makes these adapters testable with a dict-backed fake -- no catalog
+    file, no network, no class mocking. `router.model_registry.ModelRegistry`
+    satisfies it structurally.
+    """
+
+    def complexity(self, name: str) -> int | None: ...
 
 
 @dataclass
@@ -72,9 +83,6 @@ class SourceStats:
             return None
         return 100 * (self.name_slots - sum(self.unmapped.values())) / self.name_slots
 
-    @property
-    def carries_model_names(self) -> bool:
-        return bool(self.name_slots)
 
 
 @dataclass
@@ -238,7 +246,7 @@ def iter_arena_rows(key: str, hf_id: str) -> Iterator[dict[str, Any]]:
 def arena_rows(
     key: str,
     hf_id: str,
-    registry: ModelRegistry,
+    registry: NameResolver,
     stats: SourceStats,
     seen: set[str],
     limit: int | None,
@@ -274,8 +282,13 @@ def arena_rows(
         if label_tier is not None:
             stats.tier_hist[label_tier] += 1
         stats.prompt_chars.append(len(prompt))
+        # Counted *before* the yield, not after: these are generators, so a
+        # consumer that breaks early would otherwise under-report rows it has
+        # already taken. The id keeps the pre-increment value.
+        row_id = f"{key}:{stats.emitted:07d}"
+        stats.emitted += 1
         yield {
-            "id": f"{key}:{stats.emitted:07d}",
+            "id": row_id,
             "source": key,
             "label_kind": label_kind,
             "prompt": prompt,
@@ -287,7 +300,6 @@ def arena_rows(
             "label_tier": label_tier,
             **item["extra"],
         }
-        stats.emitted += 1
 
 
 # --------------------------------------------------------------------------
@@ -295,7 +307,7 @@ def arena_rows(
 
 
 def routerbench_rows(
-    registry: ModelRegistry,
+    registry: NameResolver,
     stats: SourceStats,
     seen: set[str],
     epsilon: float,
@@ -403,8 +415,10 @@ def routerbench_rows(
         if label_tier is not None:
             stats.tier_hist[label_tier] += 1
         stats.prompt_chars.append(len(prompt))
+        row_id = f"routerbench:{stats.emitted:07d}"
+        stats.emitted += 1  # before yield, as in arena_rows
         row: dict[str, Any] = {
-            "id": f"routerbench:{stats.emitted:07d}",
+            "id": row_id,
             "source": "routerbench",
             "label_kind": by_key("routerbench").label_kind,
             "prompt": prompt,
@@ -418,7 +432,6 @@ def routerbench_rows(
         if oracles is not None:
             row["oracle_model"] = oracles[i]
         yield row
-        stats.emitted += 1
 
 
 # --------------------------------------------------------------------------
@@ -469,8 +482,10 @@ def complexity_router_rows(
         seen.add(dk)
         stats.tier_hist[tier] += 1
         stats.prompt_chars.append(len(prompt))
+        row_id = f"complexity_router:{stats.emitted:07d}"
+        stats.emitted += 1  # before yield, as in arena_rows
         yield {
-            "id": f"complexity_router:{stats.emitted:07d}",
+            "id": row_id,
             "source": "complexity_router",
             "label_kind": label_kind,
             "prompt": prompt,
@@ -483,4 +498,3 @@ def complexity_router_rows(
             "solving_tiers": [tier],
             "label_tier": tier,
         }
-        stats.emitted += 1

@@ -21,11 +21,10 @@ What each metric actually means here -- and why the shapes look fussy:
 
 from __future__ import annotations
 
-import hashlib
 from collections import Counter
 from typing import Iterable
 
-from router.contracts import VAL_PROMPT_MOD
+from router.contracts import VAL_PROMPT_MOD, is_validation_prompt
 
 #: One training pair as it arrives from the pairs file: (prompt, tier, outcome).
 Triplet = tuple[str, int, float]
@@ -36,7 +35,9 @@ Scores = dict[str, dict[int, float]]
 
 
 def is_validation(triplet: Triplet, mod: int = VAL_PROMPT_MOD) -> bool:
-    return int(hashlib.sha1(triplet[0].encode()).hexdigest(), 16) % mod == 0
+    """Row-level view of the split; the hash itself lives in `contracts` so the
+    predicate cannot be implemented twice and drift."""
+    return is_validation_prompt(triplet[0], mod)
 
 
 def val_split(

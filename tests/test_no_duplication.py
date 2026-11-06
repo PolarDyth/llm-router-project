@@ -10,14 +10,42 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
+SKIP_DIRS = {".venv", ".git", ".vscode", ".zcode", ".pyright-tmp", "__pycache__",
+             "llm_router.egg-info"}
+
+
+_PY_FILES: list[pathlib.Path] | None = None
+
+
 def py_files() -> list[pathlib.Path]:
-    return sorted([*sorted(ROOT.glob("router/*.py")), *sorted(ROOT.glob("scripts/*.py"))])
+    """Every tracked Python file: package, CLIs, tests, and any future top-level
+    module. Scoping this to router/+scripts/ would let a copy reappear in tests/
+    or a new root file and still report clean. Walked once, then cached -- the
+    36 parametrized cases below would otherwise re-scan the tree each time."""
+    global _PY_FILES
+    if _PY_FILES is None:
+        _PY_FILES = sorted(
+            p for p in ROOT.rglob("*.py") if not SKIP_DIRS & set(p.parts)
+        )
+    return _PY_FILES
+
+
+def scannable_files() -> list[pathlib.Path]:
+    """py_files() minus this file: it necessarily contains the literal patterns
+    it forbids elsewhere, so scanning it would only ever report itself."""
+    return [p for p in py_files() if p.name != "test_no_duplication.py"]
+
+
+def production_files() -> list[pathlib.Path]:
+    return sorted([*sorted(ROOT.glob("router/*.py")),
+                   *sorted(ROOT.glob("scripts/*.py"))])
 
 
 def defined_names(path: pathlib.Path) -> set[str]:
@@ -75,6 +103,8 @@ SOLE_DEFINITION = {
     "pairwise_accuracy": "router/metrics.py",
     "routing_accuracy": "router/metrics.py",
     "majority_baseline": "router/metrics.py",
+    "is_validation": "router/metrics.py",
+    "is_validation_prompt": "router/contracts.py",
     "select_device": "router/devices.py",
 }
 
@@ -126,8 +156,9 @@ class TestSharedConstantsHaveOneHome:
 
 class TestNoPathHacks:
     def test_no_sys_path_patching(self):
-        offenders = [str(p.relative_to(ROOT)) for p in py_files()
-                     if "sys.path.insert" in p.read_text() or "sys.path.append" in p.read_text()]
+        offenders = [str(p.relative_to(ROOT)) for p in scannable_files()
+                     if "sys.path.insert(" in p.read_text()
+                     or "sys.path.append(" in p.read_text()]
         assert offenders == [], (
             f"these files patch sys.path instead of relying on the installed "
             f"package: {offenders}"
@@ -150,8 +181,9 @@ class TestDeviceSelection:
     def test_directml_is_never_a_static_import(self):
         """AGENTS.md hard rule: torch-directml cannot be installed on every
         platform, so it must be reached through importlib."""
-        offenders = [str(p.relative_to(ROOT)) for p in py_files()
-                     if "import torch_directml" in p.read_text()]
+        offenders = [str(p.relative_to(ROOT)) for p in scannable_files()
+                     if re.search(r"^\s*(import torch_directml|from torch_directml)",
+                                          p.read_text(), re.M)]
         assert offenders == []
 
     def test_directml_is_loaded_optional_via_importlib(self):
@@ -161,7 +193,7 @@ class TestDeviceSelection:
 
     def test_no_pin_memory_anywhere(self):
         """AGENTS.md: the manual loop exists for DirectML; pin_memory breaks it."""
-        offenders = [str(p.relative_to(ROOT)) for p in py_files()
+        offenders = [str(p.relative_to(ROOT)) for p in scannable_files()
                      if "pin_memory" in p.read_text()]
         assert offenders == []
 
@@ -179,14 +211,32 @@ class TestRowShapeDispatchIsSole:
 
 
 class TestNotebookIsTheOnlyDuplicateByNecessity:
-    def test_notebook_is_the_only_other_copy_of_the_constants(self):
+    def test_no_production_module_restates_the_tier_texts(self):
         """Anything repo-local must import; only the Colab notebook may restate."""
-        offenders = []
-        for p in [*sorted(ROOT.glob("router/*.py")), *sorted(ROOT.glob("scripts/*.py"))]:
-            text = p.read_text()
-            if "complexity tier 1 -" in text and "router/contracts.py" not in str(p):
-                offenders.append(str(p.relative_to(ROOT)))
+        offenders = [
+            str(p.relative_to(ROOT)) for p in production_files()
+            if "complexity tier 1 -" in p.read_text()
+            and str(p.relative_to(ROOT)) != "router/contracts.py"
+        ]
         assert offenders == []
+
+    def test_the_split_predicate_is_computed_in_one_place(self):
+        """`metrics.is_validation` must delegate to `contracts.is_validation_prompt`.
+        Two copies of the hash are how a held-out prompt leaks into "train"."""
+        offenders = [
+            str(p.relative_to(ROOT)) for p in production_files()
+            if "hexdigest(), 16) %" in p.read_text()
+            and str(p.relative_to(ROOT)) != "router/contracts.py"
+        ]
+        assert offenders == []
+        metrics = (ROOT / "router/metrics.py").read_text()
+        assert "is_validation_prompt(triplet[0]" in metrics
+
+    def test_no_notebook_cell_imports_the_repo(self):
+        """The notebook must stay self-contained: Colab gets only the pairs file
+        uploaded, so an `import router` there would fail at runtime."""
+        nb = (ROOT / "notebooks" / "train_router_colab.ipynb").read_text()
+        assert "from router" not in nb and "import router" not in nb
 
     def test_the_notebook_still_declares_them(self):
         """If this fails, the notebook was changed to import from the repo --

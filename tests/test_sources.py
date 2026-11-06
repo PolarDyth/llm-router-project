@@ -85,18 +85,61 @@ class TestCoverageGateEligibility:
         free = [s.key for s in SOURCES if not s.carries_model_names]
         assert free == ["complexity_router"]
 
-    def test_audited_set_is_exactly_the_name_carrying_sources(self):
+    def test_audited_set_is_the_five_name_carrying_sources(self):
+        """Spelled out rather than derived from the code under test: flipping a
+        source's name_mode must fail here, not quietly redefine the audit."""
         assert [s.key for s in AUDITABLE] == [
-            s.key for s in SOURCES if s.name_mode != NAME_MODE_NONE
+            "arena_33k", "arena_55k", "arena_100k", "arena_140k", "routerbench",
         ]
+
+    def test_name_mode_per_source_is_the_expected_table(self):
+        assert {s.key: s.name_mode for s in SOURCES} == {
+            "arena_33k": NAME_MODE_COLUMNS,
+            "arena_55k": NAME_MODE_COLUMNS,
+            "arena_100k": NAME_MODE_COLUMNS,
+            "arena_140k": NAME_MODE_COLUMNS,
+            "routerbench": NAME_MODE_PKL_MODEL_COLUMNS,
+            "complexity_router": NAME_MODE_NONE,
+        }
+
+    def test_only_the_gated_arena_set_is_flagged(self):
+        from router.sources import GATED
+
+        assert GATED == frozenset({"arena_33k"})
+        assert all(s.gated == (s.key in GATED) for s in SOURCES)
 
     def test_a_model_free_source_has_no_columns_to_audit(self):
         assert by_key("complexity_router").model_columns == ()
         assert by_key("routerbench").model_columns == ()  # names come from headers
 
-    def test_name_mode_decides_both_consumers_without_a_hardcoded_list(self):
-        for s in SOURCES:
-            assert s.carries_model_names == (s.name_mode != NAME_MODE_NONE)
+    def test_no_consumer_keeps_a_source_name_exception_list(self):
+        """The failure mode was an exemption list of source keys that got one
+        wrong. Nothing in the gate, the report, or the audit may branch on a
+        source's *name* to decide coverage."""
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parent.parent
+        for rel in ("scripts/build_training_dataset.py",
+                    "scripts/audit_model_coverage.py",
+                    "router/dataset.py", "router/sources.py"):
+            text = (root / rel).read_text()
+            assert '("routerbench", "complexity_router")' not in text, rel
+            assert '("complexity_router", "routerbench")' not in text, rel
+        # the gate's *code* (not its prose) must never name a source
+        import ast
+
+        tree = ast.parse((root / "router/dataset.py").read_text())
+        gate = next(n for n in tree.body
+                    if isinstance(n, ast.FunctionDef) and n.name == "coverage_failures")
+        head = gate.body[0]
+        doc = head.value if isinstance(head, ast.Expr) and isinstance(
+            head.value, ast.Constant) else None
+        literals = [n.value for n in ast.walk(gate)
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                    and n is not doc]
+        assert not [lit for lit in literals
+                    for key in ("arena", "routerbench", "complexity_router")
+                    if key in lit], literals
 
 
 class TestFamilySelection:

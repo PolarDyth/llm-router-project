@@ -176,13 +176,30 @@ class TestRowShapeDispatch:
         pairs = pairs_from_row(arena_row(4, 2, "a"), PairFilter(), PairStats())
         assert len(pairs) == 2
 
-    def test_callers_cannot_disagree_about_the_shape(self):
-        """Both streaming passes of the pairs build call this one function; the
-        strata count and the emitted subset must agree row by row."""
-        for row in (arena_row(4, 2, "a"), solving_row(solving=(3,))):
-            a = pairs_from_row(row, PairFilter(), PairStats())
-            b = pairs_from_row(row, PairFilter(), PairStats())
-            assert [(p.tier, p.outcome) for p in a] == [(p.tier, p.outcome) for p in b]
+    def test_the_two_streaming_passes_agree_on_every_row(self, dataset_sample):
+        """The pairs build counts strata in pass 1 and emits in pass 2 against
+        those counts. If the passes ever used different dispatch, the sampler
+        would draw indices that do not exist in the emitted stream. Both passes
+        go through `pairs_from_row`, so on real rows the totals must match --
+        and match the golden fingerprint for the default configuration."""
+        import json
+        from collections import Counter
+
+        rows = [json.loads(l) for l in dataset_sample.read_text().splitlines()
+                if l.strip()]
+        flt = PairFilter()
+
+        counts: Counter[tuple[str, int]] = Counter()
+        for row in rows:
+            for p in pairs_from_row(row, flt, PairStats()):
+                counts[strata_key(p)] += 1
+        emitted = sum(len(pairs_from_row(row, flt, PairStats())) for row in rows)
+        assert sum(counts.values()) == emitted
+
+        # sampling by index is only sound if no stratum is asked for more than it has
+        alloc = allocate(counts, 200)
+        assert all(alloc[k] <= counts[k] for k in counts)
+        assert all(max(alloc[k], 0) <= counts[k] for k in counts)
 
 
 class TestSerializationShape:

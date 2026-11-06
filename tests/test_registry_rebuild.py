@@ -11,10 +11,13 @@ from __future__ import annotations
 import collections
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
 import pytest
+
+from router.contracts import COMPLEXITY_SCALE
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CACHE = ROOT / "data" / "model_registry" / "cache"
@@ -40,14 +43,29 @@ def test_rebuild_from_cache_reproduces_the_committed_registry(tmp_path,
     )
     assert proc.returncode == 0, proc.stderr[-3000:]
 
-    rebuilt = json.loads(out.read_text())
-    committed = json.loads(json.dumps(committed_registry))  # deep copy
-    rebuilt.pop("generated_at")
-    committed.pop("generated_at")
-    assert rebuilt == committed, (
+    # Byte compare, not object compare: dict equality is blind to key ORDER,
+    # which is part of the committed artifact (and part of any diff review).
+    def stripped(text: str) -> str:
+        return re.sub(r'"generated_at": "[^"]*"', "", text)
+
+    committed_text = (ROOT / "data" / "model_registry" / "models.json").read_text()
+    rebuilt_text = out.read_text()
+    assert stripped(rebuilt_text) == stripped(committed_text), (
         "the committed registry is not what the current code + cached catalogs "
         "produce -- a scoring or normalization rule changed without a rebuild"
     )
+    if stripped(rebuilt_text) != stripped(committed_text):
+        # unreachable on success; gives a named diff instead of a 368 MB blob mismatch
+        r = {m["canonical_id"]: m for m in json.loads(rebuilt_text)["models"]}
+        c = {m["canonical_id"]: m for m in json.loads(committed_text)["models"]}
+        only_rebuilt = sorted(set(r) - set(c))[:5]
+        only_committed = sorted(set(c) - set(r))[:5]
+        changed = [k for k in set(r) & set(c) if r[k] != c[k]][:5]
+        raise AssertionError(
+            f"registry drifted: only-rebuilt={only_rebuilt} "
+            f"only-committed={only_committed} changed={changed}"
+        )
+    assert json.loads(rebuilt_text)["complexity_scale"] == COMPLEXITY_SCALE
 
 
 @needs_cache
@@ -158,20 +176,32 @@ class TestFixtureNamesResolve:
         assert kinds == {"winner_tier", "min_solving_tier", "annotated_level"}
 
     def test_fixture_contains_no_rows_from_gated_sources(self, dataset_sample):
-        """The fixture is committed; `lmsys/chatbot_arena_conversations` is
-        CC-BY-NC-4.0 and license-gated on the Hub, so its rows must never be
-        checked in or redistributed -- only resolved against locally."""
-        from router.sources import SOURCES
+        """The fixture is committed, and this repo has a remote. Any source
+        flagged `gated` in the catalog -- access by accepting terms on the Hub,
+        which is not a redistribution right -- must stay out of it. The guard
+        reads the catalog rather than a hardcoded dataset id, so a newly added
+        gated source is covered the moment it is flagged."""
+        from router.sources import GATED
 
-        gated = {s for s in SOURCES if "chatbot_arena_conversations" in s.hf_id}
-        assert gated, "if the gated source left the catalog, this guard needs updating"
+        assert "arena_33k" in GATED, "the catalog no longer flags the gated arena set"
         seen = set()
         for line in dataset_sample.read_text().splitlines():
             if line.strip():
                 seen.add(json.loads(line)["source"])
-        assert not (seen & {s.key for s in gated}), (
-            f"fixture embeds rows from a gated dataset: {seen & {s.key for s in gated}}"
-        )
+        assert not (seen & GATED), f"fixture embeds rows from gated datasets: {seen & GATED}"
+
+    def test_fixture_rows_are_all_reproducible_from_the_dataset_file(self, dataset_sample):
+        """The fixture is a slice of the real build, not hand-written data: ids
+        are sequential per source and every row carries its label kind."""
+        per: dict[str, list[int]] = {}
+        for line in dataset_sample.read_text().splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            assert row["label_kind"], row["id"]
+            per.setdefault(row["source"], []).append(int(row["id"].rsplit(":", 1)[1]))
+        for source, ids in per.items():
+            assert ids == list(range(len(ids))), f"{source} ids are not sequential"
 
     def test_every_sampled_row_has_a_label_or_a_reason_not_to(self, dataset_sample):
         """A null label is only honest for an arena tie/both_bad, or a routerbench
