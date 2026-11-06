@@ -1,0 +1,136 @@
+{
+ "cap200": {
+  "argv": [
+   "--max-pairs",
+   "200"
+  ],
+  "outcome_hist": {
+   "0.0": 111,
+   "0.5": 23,
+   "1.0": 66
+  },
+  "pairs": 200,
+  "sha256": "6ef9832db35db196d1fd403dfeee00a94660c9a2e689f696f40bc3468b2d6d0c",
+  "tier_hist": {
+   "1": 22,
+   "2": 51,
+   "3": 49,
+   "4": 56,
+   "5": 22
+  }
+ },
+ "cap200_seed99": {
+  "argv": [
+   "--max-pairs",
+   "200",
+   "--seed",
+   "99"
+  ],
+  "outcome_hist": {
+   "0.0": 112,
+   "0.5": 22,
+   "1.0": 66
+  },
+  "pairs": 200,
+  "sha256": "406e852ed0f9e6edeafc338a991d6db54fd5389b160eb1335e72a4ec03064acc",
+  "tier_hist": {
+   "1": 22,
+   "2": 51,
+   "3": 49,
+   "4": 56,
+   "5": 22
+  }
+ },
+ "cr_only": {
+  "argv": [
+   "--sources",
+   "complexity_router"
+  ],
+  "outcome_hist": {
+   "0.0": 480,
+   "1.0": 120
+  },
+  "pairs": 600,
+  "sha256": "c6be9fa76deb393bd3b2c61c8efa83b84ea7c07ee7c9cce2644070d1c2225645",
+  "tier_hist": {
+   "1": 120,
+   "2": 120,
+   "3": 120,
+   "4": 120,
+   "5": 120
+  }
+ },
+ "default": {
+  "argv": [],
+  "outcome_hist": {
+   "0.0": 679,
+   "0.5": 166,
+   "1.0": 375
+  },
+  "pairs": 1220,
+  "sha256": "5cd232359b5e86412f5952fa5cf54d817cb1e8e04bd4b7102955a9ff4cc47707",
+  "tier_hist": {
+   "1": 134,
+   "2": 305,
+   "3": 304,
+   "4": 340,
+   "5": 137
+  }
+ },
+ "gap2_noties": {
+  "argv": [
+   "--min-tier-gap",
+   "2",
+   "--drop-ties"
+  ],
+  "outcome_hist": {
+   "0.0": 592,
+   "1.0": 288
+  },
+  "pairs": 880,
+  "sha256": "f39eb9ed1dcb90082ccdc552f8bb3b00a48f49d6ce092888751d96f2516b150f",
+  "tier_hist": {
+   "1": 125,
+   "2": 226,
+   "3": 175,
+   "4": 228,
+   "5": 126
+  }
+ },
+ "keep_same": {
+  "argv": [
+   "--keep-same-tier"
+  ],
+  "outcome_hist": {
+   "0.0": 761,
+   "0.5": 166,
+   "1.0": 457
+  },
+  "pairs": 1384,
+  "sha256": "b66bff86d782e7c4b81cfc67a28fb0d4b5e8bd5e1d7fce10f00340ec0bd82f0f",
+  "tier_hist": {
+   "1": 136,
+   "2": 343,
+   "3": 330,
+   "4": 436,
+   "5": 139
+  }
+ },
+ "routerbench_only": {
+  "argv": [
+   "--sources",
+   "routerbench"
+  ],
+  "outcome_hist": {
+   "0.0": 44,
+   "1.0": 100
+  },
+  "pairs": 144,
+  "sha256": "6f8fd6276d2bee05e1197e68de0a30e25281987ca8f1b0abd00b93fd90d3d491",
+  "tier_hist": {
+   "2": 48,
+   "3": 48,
+   "4": 48
+  }
+ }
+}

@@ -11,6 +11,10 @@ venv/
 __pycache__/
 eval_reports/
 
+# editable install of the `router` package (pip install -e .)
+*.egg-info/
+.DS_Store
+
 .zcode/
 .vscode/
 .pyright-tmp/

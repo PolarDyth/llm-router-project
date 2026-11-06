@@ -7,6 +7,11 @@ the model complexity registry, and reports the resolution rate plus a
 frequency-ranked list of unmapped names. Iterate on overrides.yaml until
 every training source is >= 99%.
 
+`--all` audits the same source catalog `build_training_dataset.py` builds from
+(`router.sources.AUDITABLE`), so this predicts exactly what the build's
+coverage gate will decide. Model-free sources have no names to resolve and are
+not listed.
+
 Usage:
   python scripts/audit_model_coverage.py                       # arena 140k
   python scripts/audit_model_coverage.py --all                 # full training suite
@@ -20,48 +25,33 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import sys
 from collections import Counter
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
 from datasets.exceptions import DatasetNotFoundError
 from huggingface_hub.errors import GatedRepoError
 
+from router.contracts import COVERAGE_TARGET
+from router.model_registry import ModelRegistry, get_registry
+from router.sources import (
+    AUDITABLE,
+    NAME_MODE_PKL_MODEL_COLUMNS,
+    ROUTERBENCH_FILE,
+    ROUTERBENCH_HF,
+    Source,
+    by_key,
+    routerbench_model_columns,
+)
+
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-from router.model_registry import ModelRegistry, get_registry  # noqa: E402
-
-DEFAULT_DATASET = "lmarena-ai/arena-human-preference-140k"
-DEFAULT_COLUMNS = ["model_a", "model_b"]
 OUT_REPORT = ROOT / "eval_reports" / "model_coverage_audit.md"
-COVERAGE_TARGET = 99.0
 
-
-@dataclass
-class Source:
-    key: str
-    hf_id: str
-    columns: list[str]
-    note: str
-    kind: str = "hf"  # "hf" | "routerbench" (pickle blob on the hub)
-
-
-# The full training suite: four arena generations + RouterBench 0-shot.
-SOURCES: list[Source] = [
-    Source("arena_33k", "lmsys/chatbot_arena_conversations", ["model_a", "model_b"],
-           "2023 Chatbot Arena"),
-    Source("arena_55k", "lmarena-ai/arena-human-preference-55k", ["model_a", "model_b"],
-           "2023-24 LMArena battles (csv, flat prompt)"),
-    Source("arena_100k", "lmarena-ai/arena-human-preference-100k", ["model_a", "model_b"],
-           "2024 LMArena battles"),
-    Source("arena_140k", "lmarena-ai/arena-human-preference-140k", ["model_a", "model_b"],
-           "2025 LMArena battles"),
-    Source("routerbench", "withmartian/routerbench", ["model"],
-           "RouterBench 0-shot (pkl): 30k prompts x 11 models",
-           kind="routerbench"),
-]
+# Derived from the catalog rather than restated, so the audit's defaults cannot
+# drift from the sources it is auditing.
+_ARENA_140K = by_key("arena_140k")
+DEFAULT_DATASET = _ARENA_140K.hf_id
+DEFAULT_COLUMNS = list(_ARENA_140K.model_columns)
 
 # (source or None, display label, resolved, unmapped, total rows)
 AuditResult = tuple["Source | None", str, Counter[str], Counter[str], int]
@@ -84,20 +74,14 @@ def names_from_hf(dataset_id: str, columns: list[str]) -> Counter[str]:
     return counts
 
 
-ROUTERBENCH_META_COLS = {"sample_id", "prompt", "eval_name", "oracle_model_to_route_to"}
-
-
-def routerbench_model_columns(columns: list[str]) -> list[str]:
-    """Wide pkl: quality lives in bare '<model>' columns; '<model>|suffix' is not."""
-    return [c for c in columns if "|" not in str(c) and str(c) not in ROUTERBENCH_META_COLS]
-
-
 def names_from_routerbench() -> Counter[str]:
+    """The wide pkl's model names are its column headers, one row per prompt."""
     from huggingface_hub import hf_hub_download
+
     import pandas as pd
 
-    path = hf_hub_download(repo_id="withmartian/routerbench",
-                           filename="routerbench_0shot.pkl", repo_type="dataset")
+    path = hf_hub_download(repo_id=ROUTERBENCH_HF,
+                           filename=ROUTERBENCH_FILE, repo_type="dataset")
     df = pd.read_pickle(path)
     model_cols = routerbench_model_columns(list(df.columns))
     if not model_cols:
@@ -150,9 +134,9 @@ def resolve_counts(registry: ModelRegistry,
 
 
 def load_names(source: Source) -> Counter[str]:
-    if source.kind == "routerbench":
+    if source.name_mode == NAME_MODE_PKL_MODEL_COLUMNS:
         return names_from_routerbench()
-    return names_from_hf(source.hf_id, source.columns)
+    return names_from_hf(source.hf_id, list(source.model_columns))
 
 
 def _print_counts(label: str, resolved: Counter[str], unmapped: Counter[str],
@@ -229,7 +213,7 @@ def main() -> None:
         if args.file:
             raise SystemExit("--all cannot be combined with --file")
         label = "full training suite"
-        for source in SOURCES:
+        for source in AUDITABLE:
             print(f"auditing {source.key} ({source.hf_id}) ...")
             try:
                 counts = load_names(source)

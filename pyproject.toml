@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-router"
+version = "0.1.0"
+description = "Complexity-based LLM router: model complexity registry, training-data pipeline, and checkpoint eval"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+# Single source of truth for runtime deps stays in requirements.txt (it carries
+# the torch install-matrix prose); pyproject reads it rather than duplicating it.
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["router*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

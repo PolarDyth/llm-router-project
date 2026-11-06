@@ -10,9 +10,14 @@ tier). Then routes a few demo prompts taken straight from the training data,
 with their gold tiers shown.
 
 This never trains: batched forward passes only, safe on the Mac
-(MPS/CPU) against a Colab-trained checkpoint. The split, max length and
-tier texts must match training — they are read from the checkpoint's
-tier_texts.json and reproduce the notebook's constants by default.
+(MPS/CPU) against a Colab-trained checkpoint.
+
+The split, max length and metric definitions come from `router.contracts` and
+`router.metrics` — the same modules the notebook's inline copies are tested
+against — so the numbers printed here are the notebook's numbers by
+construction rather than by discipline. `tier_texts.json` is still read from
+the checkpoint, because the checkpoint defines what its own scores mean; the
+constants only describe the split and the truncation.
 
 Usage:
   python scripts/eval_checkpoint.py                          # defaults below
@@ -23,21 +28,29 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
-import importlib
 import json
-from collections import Counter
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import torch
+
+from router.contracts import MAX_LEN, VAL_PROMPT_MOD
+from router.devices import VALID_DEVICES, select_device
+from router.metrics import (
+    Triplet,
+    group_by_prompt,
+    majority_baseline,
+    metric_cohort,
+    pairwise_accuracy,
+    routing_accuracy,
+    train_split,
+    val_split,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
 CHECKPOINT_DEFAULT = ROOT / "models" / "complexity_router" / "final"
 PAIRS_DEFAULT = ROOT / "data" / "router_training_pairs.jsonl"
-MAX_LEN = 256        # must match training
-VAL_PROMPT_MOD = 20  # notebook split: sha1(prompt) % 20 == 0 -> validation
 
 # One demo prompt per labeled level, all pulled from the pairs source data
 # (gold = the labeled tier, shown next to the routing decision).
@@ -53,25 +66,9 @@ DEMO_PROMPTS = [
 ]
 
 
-def pick_device(override: str | None) -> torch.device:
-    if override:
-        return torch.device(override)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return torch.device("mps")
-    try:
-        torch_directml = importlib.import_module("torch_directml")  # never a hard import
-        device_fn = getattr(torch_directml, "device", None)
-        if callable(device_fn):
-            return cast(torch.device, device_fn())
-    except (ImportError, OSError):
-        pass
-    return torch.device("cpu")
-
-
-def load_pairs(path: Path) -> list[tuple[str, int, float]]:
-    rows: list[tuple[str, int, float]] = []
+def load_pairs(path: Path) -> list[Triplet]:
+    """The pairs file reduced to the three fields the router trains on."""
+    rows: list[Triplet] = []
     with path.open() as f:
         for line in f:
             if not line.strip():
@@ -79,14 +76,6 @@ def load_pairs(path: Path) -> list[tuple[str, int, float]]:
             r = json.loads(line)
             rows.append((r["prompt"], int(r["tier"]), float(r["outcome"])))
     return rows
-
-
-def notebook_val_split(rows: list[tuple[str, int, float]],
-                       val_mod: int) -> list[tuple[str, int, float]]:
-    return [
-        triplet for triplet in rows
-        if int(hashlib.sha1(triplet[0].encode()).hexdigest(), 16) % val_mod == 0
-    ]
 
 
 @torch.no_grad()
@@ -117,58 +106,6 @@ def score_matrix(model: Any, tokenizer: Any, device: torch.device,
     return scores
 
 
-def metric_cohort(by_prompt: dict[str, dict[int, float]]
-                  ) -> tuple[list[str], int]:
-    """Decisive prompts (exactly one 1.0 outcome) + their eval-pair count."""
-    decisive = [
-        prompt for prompt, tiers in by_prompt.items()
-        if list(tiers.values()).count(1.0) == 1
-    ]
-    pairs = 0
-    for prompt in decisive:
-        gold = next(t for t, o in by_prompt[prompt].items() if o == 1.0)
-        pairs += sum(1 for o in by_prompt[prompt].values() if o == 0.0)
-        _ = gold
-    return decisive, pairs
-
-
-def pairwise_accuracy(by_prompt: dict[str, dict[int, float]],
-                      scores: dict[str, dict[int, float]]) -> float:
-    correct = total = 0
-    for prompt, tiers in by_prompt.items():
-        wins = [t for t, o in tiers.items() if o == 1.0]
-        losses = [t for t, o in tiers.items() if o == 0.0]
-        for w in wins:
-            for l in losses:
-                total += 1
-                correct += scores[prompt][w] > scores[prompt][l]
-    return correct / max(total, 1)
-
-
-def routing_accuracy(by_prompt: dict[str, dict[int, float]],
-                     scores: dict[str, dict[int, float]]) -> float:
-    correct = total = 0
-    for prompt, tiers in by_prompt.items():
-        gold = [t for t, o in tiers.items() if o == 1.0]
-        if len(gold) != 1:
-            continue
-        total += 1
-        correct += max(scores[prompt], key=lambda t: scores[prompt][t]) == gold[0]
-    return correct / max(total, 1)
-
-
-def majority_baseline(by_prompt: dict[str, dict[int, float]]) -> tuple[float, int] | None:
-    golds = [
-        next(t for t, o in tiers.items() if o == 1.0)
-        for tiers in by_prompt.values()
-        if list(tiers.values()).count(1.0) == 1
-    ]
-    if not golds:
-        return None
-    top, count = Counter(golds).most_common(1)[0]
-    return count / len(golds), top
-
-
 def route_demo(model: Any, tokenizer: Any, device: torch.device,
                tier_texts: dict[int, str]) -> None:
     print("\ndemo routes (gold tier from the labeled data):")
@@ -189,7 +126,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", type=Path, default=CHECKPOINT_DEFAULT)
     ap.add_argument("--pairs", type=Path, default=PAIRS_DEFAULT)
-    ap.add_argument("--device", default=None, help="cpu / mps / cuda override")
+    ap.add_argument("--device", default=None,
+                    help=f"force one of: {', '.join(VALID_DEVICES[1:])} (default: auto)")
     ap.add_argument("--batch-size", type=int, default=64)
     ap.add_argument("--skip-train", action="store_true",
                     help="skip the training-split diagnostic")
@@ -199,23 +137,22 @@ def main() -> None:
         (args.checkpoint / "tier_texts.json").read_text()).items()}
     rows = load_pairs(args.pairs)
 
-    device = pick_device(args.device)
+    device = select_device(args.device)
     tokenizer = AutoTokenizer.from_pretrained(str(args.checkpoint))
+    # num_labels=1 must be restated: the head is a scalar regressor over the
+    # tier text, and the default would rebuild a 2-class head that cannot load.
     model = AutoModelForSequenceClassification.from_pretrained(
         str(args.checkpoint), num_labels=1).to(device).eval()
     print(f"checkpoint: {args.checkpoint} | device: {device} | "
           f"pairs: {len(rows)} from {args.pairs.name}")
 
-    val = notebook_val_split(rows, VAL_PROMPT_MOD)
-    val_prompts = sorted({p for p, _t, _o in val})
-    by_prompt: dict[str, dict[int, float]] = {}
-    for prompt, tier, outcome in val:
-        by_prompt.setdefault(prompt, {})[tier] = outcome
+    val = val_split(rows, VAL_PROMPT_MOD)
+    by_prompt = group_by_prompt(val)
     val_scores = score_matrix(model, tokenizer, device, tier_texts,
-                              val_prompts, args.batch_size)
+                              sorted(by_prompt), args.batch_size)
     decisive, eval_pairs = metric_cohort(by_prompt)
-    print(f"\nval split: {len(val)} rows / {len(val_prompts)} prompts "
-          f"({decisive and len(decisive)} decisive, {eval_pairs} eval pairs)")
+    print(f"\nval split: {len(val)} rows / {len(by_prompt)} prompts "
+          f"({len(decisive)} decisive, {eval_pairs} eval pairs)")
     baseline = majority_baseline(by_prompt)
     if baseline:
         print(f"majority-tier baseline: {baseline[0]:.3f} "
@@ -224,15 +161,11 @@ def main() -> None:
     print(f"routing accuracy:   {routing_accuracy(by_prompt, val_scores):.3f}")
 
     if not args.skip_train:
-        train = [triplet for triplet in rows if triplet not in set(val)]
-        train_prompts = sorted({p for p, _t, _o in train})
-        train_by: dict[str, dict[int, float]] = {}
-        for prompt, tier, outcome in train:
-            train_by.setdefault(prompt, {})[tier] = outcome
+        train_by = group_by_prompt(train_split(rows, VAL_PROMPT_MOD))
         train_scores = score_matrix(model, tokenizer, device, tier_texts,
-                                    train_prompts, args.batch_size)
-        print(f"train split diagnostic: {len(train)} rows / "
-              f"{len(train_prompts)} prompts")
+                                    sorted(train_by), args.batch_size)
+        print(f"train split diagnostic: {len(rows) - len(val)} rows / "
+              f"{len(train_by)} prompts")
         print(f"  pairwise accuracy:  "
               f"{pairwise_accuracy(train_by, train_scores):.3f}")
         print(f"  routing accuracy:   "

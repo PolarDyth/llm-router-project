@@ -1,5 +1,8 @@
 """Cross-platform device selection for the LLM router.
 
+Scripts import `select_device`; the notebook and any future Colab-side code must
+carry their own inline copy because Colab has no repo checkout.
+
 Supported accelerators, in priority order:
   1. cuda   - NVIDIA GPUs, and AMD GPUs via ROCm (Linux, and Windows on
               RX 7000/9000-series via AMD's official wheels). ROCm builds
