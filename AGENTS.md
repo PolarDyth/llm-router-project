@@ -7,9 +7,11 @@ training data is labeled by translating every model name into a complexity
 tier 1–5 (absolute capability: Opus-class = 5, flash/mini = 1). Step 1 — the
 model registry — is done and committed. Step 2 — the (prompt → complexity)
 training dataset builder — is done too: `scripts/build_training_dataset.py`
-labels four LMArena battle releases + RouterBench through the resolver.
-Next step: wire `data/router_training_dataset.jsonl` into the Colab notebook
-and train there.
+labels four LMArena battle releases + RouterBench through the resolver, plus
+the model-free `RowRed/ComplexityRouter` annotations. Next step: train on it
+in the Colab notebook (now fine-tuning `microsoft/deberta-v3-base`) and
+decide per the standing protocol — pairwise acc climbing toward 0.66–0.68 →
+scale up; flat → pivot the label source.
 
 ## Layout
 
@@ -19,23 +21,34 @@ and train there.
   models.dev, Epoch AI) and scores tiers → `data/model_registry/models.json`
 - `scripts/audit_model_coverage.py` — resolves a dataset's model columns
   against the registry; coverage must stay ≥ 99% (`--all` audits the full
-  training suite; every accessible source is at 100%)
+  training suite; every accessible source is at 100%; the model-free
+  ComplexityRouter source has no names to audit and isn't listed)
 - `scripts/build_training_dataset.py` — builds
   `data/router_training_dataset.jsonl` (gitignored): arena winner-tier
-  labels + RouterBench min-solving-tier labels; hard-fails below 99%
-  coverage per source
+  labels + RouterBench min-solving-tier labels through the resolver, plus
+  `complexity_router` (RowRed/ComplexityRouter: Qwen3.5-4B complexity
+  levels 0–3 mapped linearly to tiers 1–4, `label_kind="annotated_level"`,
+  `synthetic` flag marks the 813 synthetic rewrites; no resolver, so the
+  coverage gate doesn't apply); hard-fails below 99% coverage per
+  model-name source
 - `scripts/build_training_pairs.py` — derives
   `data/router_training_pairs.jsonl` (gitignored) from that file locally:
   (prompt, tier, outcome 1.0/0.5/0.0, source) rows for pairwise training;
-  skips same-tier decisive battles (no complexity gradient); `--max-pairs`
-  applies a seeded stratified (source, tier) sample — the on-disk file is
-  the 15k capped version for fast training
+  skips same-tier decisive battles (no complexity gradient); routerbench-
+  shaped rows (`candidate_tiers`/`solving_tiers`: routerbench AND
+  complexity_router) emit solving tiers 1.0 / other candidates 0.0;
+  `--max-pairs` applies a seeded stratified (source, tier) sample;
+  `--sources` restricts which sources contribute — the on-disk file is
+  currently complexity_router-only (20k pairs, complete 5-tier groups per
+  prompt) for the active experiment; omit the flag for the merged file
+  (~244k pairs under the gap filter)
 - `data/model_registry/models.json` — **generated but committed**; never
   hand-edit. All hand tiers/aliases/created entries go in
   `data/model_registry/overrides.yaml`, then rebuild
 - `data/model_registry/cache/`, `build_report.md`, `eval_reports/`,
   `models/` — gitignored
 - `notebooks/train_router_colab.ipynb` — the only training environment
+  (fine-tunes `microsoft/deberta-v3-base`; tokenizer needs `sentencepiece`)
 - `training/` — empty; the old training script exists only in git history
   (`git show 993610e:training/train_router.py`). README sections below the
   registry section describe that retired capability/eval pipeline — don't
@@ -46,8 +59,8 @@ and train there.
 ```bash
 .venv/bin/python scripts/build_model_registry.py [--refresh]   # regenerate models.json
 .venv/bin/python scripts/audit_model_coverage.py --all         # audit the full training suite
-.venv/bin/python scripts/build_training_dataset.py             # rebuild the training dataset
-.venv/bin/python scripts/build_training_pairs.py               # derive training pairs
+.venv/bin/python scripts/build_training_dataset.py --sources arena,routerbench,complexity_router
+.venv/bin/python scripts/build_training_pairs.py --sources complexity_router
 .venv/bin/pyright router/ scripts/                             # must stay 0 errors
 ```
 

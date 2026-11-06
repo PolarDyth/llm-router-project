@@ -13,13 +13,17 @@ Rules:
   arena, decisive (winner a/b), different tiers -> (winner tier, 1.0) and
       (loser tier, 0.0)
   arena, tie or both_bad, different tiers       -> both tiers at 0.5
-      ("no preference between these tiers on this prompt")
+      ("no preference between these tiers on this prompt");
+      --drop-ties skips those instead (ties compress the between-tier
+      separation the router needs)
   same-tier battles                              -> skipped (a decisive
       battle between two equal tiers carries no complexity gradient and
       self-cancels in training; --keep-same-tier emits them anyway)
-  routerbench, something solved                  -> every solving tier at
-      1.0, every non-solving candidate tier at 0.0
-  routerbench, nothing solved (solving_tiers []) -> skipped (no ordering
+  routerbench-style rows (anything with candidate_tiers/solving_tiers:
+      routerbench, complexity_router) -> every solving tier at 1.0, every
+      other candidate tier at 0.0 (complexity_router emits a single gold
+      tier, so its label tier wins and the other four tiers lose)
+  nothing solved (solving_tiers [])              -> skipped (no ordering
       signal between tiers)
 
 --max-pairs N caps the output with a seeded stratified sample over
@@ -31,6 +35,15 @@ Usage:
   python scripts/build_training_pairs.py                       # full file
   python scripts/build_training_pairs.py --max-pairs 15000     # capped
   python scripts/build_training_pairs.py --keep-same-tier
+  python scripts/build_training_pairs.py --min-tier-gap 2 --drop-ties
+  python scripts/build_training_pairs.py --sources complexity_router
+
+--sources a,b restricts which dataset sources contribute pairs (default:
+all sources in the dataset file).
+
+--min-tier-gap N keeps only battles whose tiers differ by >= N: adjacent-tier
+human votes are near-coin-flips (the higher tier wins ~57% at gap 1 vs ~71%
+at gap 3), so those pairs mostly inject label noise.
 """
 
 from __future__ import annotations
@@ -57,12 +70,15 @@ class PairStats:
     rows_in: int = 0
     pairs: int = 0
     same_tier_skipped: int = 0
+    filter_skipped: int = 0
+    ties_skipped: int = 0
     no_signal_skipped: int = 0
     outcome_hist: Counter[str] = field(default_factory=Counter)
     tier_hist: Counter[int] = field(default_factory=Counter)
 
 
 def arena_pairs(row: dict[str, object], keep_same_tier: bool,
+                min_tier_gap: int, drop_ties: bool,
                 stats: PairStats) -> list[dict[str, object]]:
     tier_a = row["tier_a"]
     tier_b = row["tier_b"]
@@ -74,6 +90,12 @@ def arena_pairs(row: dict[str, object], keep_same_tier: bool,
         if not keep_same_tier or winner not in ("a", "b"):
             stats.same_tier_skipped += 1
             return []
+    if min_tier_gap and abs(tier_a - tier_b) < min_tier_gap:
+        stats.filter_skipped += 1
+        return []
+    if winner in ("tie", "both_bad") and drop_ties:
+        stats.ties_skipped += 1
+        return []
     prompt = row["prompt"]
     source = row["source"]
     if winner == "a":
@@ -91,8 +113,12 @@ def arena_pairs(row: dict[str, object], keep_same_tier: bool,
     ]
 
 
-def routerbench_pairs(row: dict[str, object],
-                      stats: PairStats) -> list[dict[str, object]]:
+def solving_tier_pairs(row: dict[str, object],
+                       stats: PairStats) -> list[dict[str, object]]:
+    """Pairs from min-solving-tier rows (routerbench, complexity_router):
+    every solving tier at 1.0, every other candidate tier at 0.0.
+    complexity_router labels a single gold tier, so the other four tiers
+    all lose -- the min-cost routing signal."""
     candidates = row.get("candidate_tiers")
     solving = row.get("solving_tiers")
     if solving is None:  # dataset built before the field existed
@@ -109,7 +135,9 @@ def routerbench_pairs(row: dict[str, object],
     ]
 
 
-def strata_counts(infile: Path, keep_same_tier: bool) -> Counter[tuple[str, int]]:
+def strata_counts(infile: Path, keep_same_tier: bool, min_tier_gap: int,
+                  drop_ties: bool,
+                  only_sources: set[str] | None) -> Counter[tuple[str, int]]:
     """Pass 1: how many pairs fall in each (source, tier) stratum."""
     counts: Counter[tuple[str, int]] = Counter()
     for line in infile.open():
@@ -118,10 +146,13 @@ def strata_counts(infile: Path, keep_same_tier: bool) -> Counter[tuple[str, int]
         row = json.loads(line)
         stats = PairStats()
         source = str(row.get("source", "?"))
-        if source == "routerbench":
-            pairs = routerbench_pairs(row, stats)
+        if only_sources is not None and source not in only_sources:
+            continue
+        if isinstance(row.get("candidate_tiers"), list):
+            pairs = solving_tier_pairs(row, stats)
         else:
-            pairs = arena_pairs(row, keep_same_tier, stats)
+            pairs = arena_pairs(row, keep_same_tier, min_tier_gap, drop_ties,
+                                stats)
         for p in pairs:
             counts[(source, cast(int, p["tier"]))] += 1
     return counts
@@ -155,6 +186,13 @@ def main() -> None:
                     help="also emit decisive same-tier battles as 1.0/0.0")
     ap.add_argument("--max-pairs", type=int, default=None,
                     help="cap output via stratified (source, tier) sampling")
+    ap.add_argument("--min-tier-gap", type=int, default=0,
+                    help="keep only arena battles whose tiers differ by >= N")
+    ap.add_argument("--drop-ties", action="store_true",
+                    help="skip tie / both_bad battles instead of 0.5 targets")
+    ap.add_argument("--sources", default=None,
+                    help="comma list restricting which sources contribute "
+                         "pairs (default: all sources in the dataset file)")
     ap.add_argument("--seed", type=int, default=13,
                     help="sampling seed (deterministic builds)")
     args = ap.parse_args()
@@ -162,8 +200,21 @@ def main() -> None:
     if not args.infile.exists():
         raise SystemExit(f"missing {args.infile} - run "
                          f"scripts/build_training_dataset.py first")
+    requested_sources = (
+        {s.strip() for s in args.sources.split(",") if s.strip()}
+        if args.sources is not None else None
+    )
 
-    counts = strata_counts(args.infile, args.keep_same_tier)
+    counts = strata_counts(args.infile, args.keep_same_tier,
+                           args.min_tier_gap, args.drop_ties, requested_sources)
+    if requested_sources is not None:
+        available = {key for key, _tier in counts}
+        missing = requested_sources - available
+        if missing:
+            raise SystemExit(
+                f"sources {sorted(missing)} contribute no pairs in "
+                f"{args.infile}; sources with pairs: {sorted(available)}"
+            )
     total_available = sum(counts.values())
     alloc = allocate(counts, args.max_pairs) if args.max_pairs else dict(counts)
     # pass 2 must draw the SAME subset: precompute chosen indices per stratum
@@ -183,12 +234,15 @@ def main() -> None:
                 continue
             row = json.loads(line)
             source = str(row.get("source", "?"))
+            if requested_sources is not None and source not in requested_sources:
+                continue
             stats = stats_by_source.setdefault(source, PairStats())
             stats.rows_in += 1
-            if source == "routerbench":
-                pairs = routerbench_pairs(row, stats)
+            if isinstance(row.get("candidate_tiers"), list):
+                pairs = solving_tier_pairs(row, stats)
             else:
-                pairs = arena_pairs(row, args.keep_same_tier, stats)
+                pairs = arena_pairs(row, args.keep_same_tier,
+                                    args.min_tier_gap, args.drop_ties, stats)
             for p in pairs:
                 key = (source, cast(int, p["tier"]))
                 idx = seen_in_stratum[key]
@@ -207,13 +261,18 @@ def main() -> None:
     with REPORT_PATH.open("w") as f:
         f.write("# training pairs report\n\n")
         f.write(f"generated: {date.today().isoformat()} | "
+                f"sources: {args.sources or 'all'} | "
                 f"keep_same_tier: {args.keep_same_tier} | "
+                f"min_tier_gap: {args.min_tier_gap} | "
+                f"drop_ties: {args.drop_ties} | "
                 f"max_pairs: {args.max_pairs or 'none'} | seed: {args.seed}\n\n")
         f.write("| source | dataset rows | pairs | same-tier skipped | "
-                "no-signal skipped |\n|---|---|---|---|---|\n")
+                "gap/ties skipped | no-signal skipped |\n|---|---|---|---|---|---|\n")
         for source, s in stats_by_source.items():
             f.write(f"| {source} | {s.rows_in} | {s.pairs} | "
-                    f"{s.same_tier_skipped} | {s.no_signal_skipped} |\n")
+                    f"{s.same_tier_skipped} | "
+                    f"{s.filter_skipped + s.ties_skipped} | "
+                    f"{s.no_signal_skipped} |\n")
         f.write(f"\navailable pairs: {total_available} | emitted: {total}\n\n")
         if args.max_pairs and args.max_pairs < total_available:
             f.write(f"stratified sample over (source, tier); "
@@ -232,7 +291,9 @@ def main() -> None:
     tmp.replace(args.out)
     for source, s in stats_by_source.items():
         print(f"{source}: rows={s.rows_in} pairs={s.pairs} "
-              f"same-tier-skip={s.same_tier_skipped} no-signal={s.no_signal_skipped}")
+              f"same-tier-skip={s.same_tier_skipped} "
+              f"gap/ties-skip={s.filter_skipped + s.ties_skipped} "
+              f"no-signal={s.no_signal_skipped}")
     print(f"wrote {args.out} ({total} pairs"
           + (f", capped from {total_available}" if args.max_pairs
              and args.max_pairs < total_available else "")

@@ -17,13 +17,24 @@ registry in data/model_registry/models.json):
             when scores are binary); solving_tiers lists every tier that
             cleared the bar (empty when nothing did).
 
+  complexity_router -- RowRed/ComplexityRouter (4k OASST2 prompts
+            annotated with complexity levels 0-3 by Qwen3.5-4B, plus
+            synthetic complex rewrites marked by the original_message_id
+            "Level0_to_Level3"). Model-free: labels arrive directly, so no
+            resolver and no coverage gate. label_kind="annotated_level":
+            level maps linearly onto tiers 1-4 (LEVEL_TO_TIER); the row
+            reuses the routerbench shape with solving_tiers=[label_tier],
+            i.e. the gold tier wins and every other tier loses.
+
 Gates: model-name coverage per source must be >= 99% (add gaps to
 data/model_registry/overrides.yaml, rebuild the registry, retry); duplicate
-battles (same prompt + model pair) across releases are dropped.
+battles (same prompt + model pair) across releases are dropped. Model-free
+sources (complexity_router) have no names to resolve and are exempt.
 
 Usage:
   python scripts/build_training_dataset.py                     # arena only
   python scripts/build_training_dataset.py --sources arena,routerbench
+  python scripts/build_training_dataset.py --sources arena,routerbench,complexity_router
   python scripts/build_training_dataset.py --limit 500         # smoke run
 """
 
@@ -59,6 +70,13 @@ ARENA_SOURCES = [
 ]
 
 ROUTERBENCH_FILE = "routerbench_0shot.pkl"
+
+COMPLEXITY_ROUTER_HF = "RowRed/ComplexityRouter"
+# ComplexityRouter's 4-level annotation scale onto the router's 5-tier scale.
+# Linear: level 3 lands on tier 4, so tier 5 stays arena/routerbench-only
+# signal and the synthetic rewrites ("frontier needed") stop short of it.
+LEVEL_TO_TIER = {0: 1, 1: 2, 2: 3, 3: 4}
+COMPLEXITY_ROUTER_SYNTHETIC_ID = "Level0_to_Level3"  # id marker of rewrites
 
 
 @dataclass
@@ -405,6 +423,74 @@ def build_routerbench(
 
 
 # --------------------------------------------------------------------------
+# complexity_router adapter
+
+
+def build_complexity_router(
+    out: TextIO,
+    stats: SourceStats,
+    seen: set[str],
+    limit: int | None,
+) -> None:
+    """Ingest RowRed/ComplexityRouter (model-free, direct complexity labels).
+
+    Train split only -- the 400-row test split stays untouched as an external
+    benchmark. Dedup runs through the shared `seen` set so prompts already
+    labeled by arena/routerbench are not double-labeled under a second,
+    possibly conflicting label (the notebook's val split groups by prompt).
+    """
+    from datasets import load_dataset
+
+    ds = load_dataset(COMPLEXITY_ROUTER_HF, split="train")
+    for raw in ds:
+        if limit is not None and stats.scanned >= limit:
+            break
+        stats.scanned += 1
+        row = cast(dict[str, Any], raw)
+        prompt = str(row.get("prompt", "")).strip()
+        if not prompt:
+            stats.unresolved_dropped += 1
+            continue
+        try:
+            level = int(row["level"])
+        except (KeyError, TypeError, ValueError):
+            stats.unresolved_dropped += 1
+            continue
+        tier = LEVEL_TO_TIER.get(level)
+        if tier is None:
+            stats.unresolved_dropped += 1
+            continue
+        dk = dedup_key(prompt, ["complexity_router"])
+        if dk in seen:
+            stats.dup_skipped += 1
+            continue
+        seen.add(dk)
+        stats.tier_hist[tier] += 1
+        stats.prompt_chars.append(len(prompt))
+        out.write(
+            json.dumps(
+                {
+                    "id": f"complexity_router:{stats.emitted:07d}",
+                    "source": "complexity_router",
+                    "label_kind": "annotated_level",
+                    "prompt": prompt,
+                    "level": level,
+                    "category": str(row.get("category", "")),
+                    "reason": str(row.get("reason", "")),
+                    "synthetic": str(row.get("original_message_id", ""))
+                    == COMPLEXITY_ROUTER_SYNTHETIC_ID,
+                    "candidate_tiers": [1, 2, 3, 4, 5],
+                    "solving_tiers": [tier],
+                    "label_tier": tier,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        stats.emitted += 1
+
+
+# --------------------------------------------------------------------------
 # reporting
 
 
@@ -420,9 +506,12 @@ def percentile(sorted_vals: list[int], p: float) -> int:
 
 
 def model_slots(key: str, s: SourceStats) -> int:
-    """Model-name slots the source contributes (2 per arena battle, 1 per rb row)."""
+    """Model-name slots the source contributes (2 per arena battle; 0 for the
+    model-free sources routerbench and complexity_router)."""
+    if key in ("routerbench", "complexity_router"):
+        return 0
     rows = s.emitted + s.unresolved_dropped
-    return 2 * rows if key != "routerbench" else rows
+    return 2 * rows
 
 
 def write_report(
@@ -459,7 +548,7 @@ def write_report(
                 for name, n in s.unmapped.most_common():
                     f.write(f"| `{name}` | {n} |\n")
                 f.write("\n")
-            if key != "routerbench":
+            if key not in ("routerbench", "complexity_router"):
                 f.write(f"winner distribution: {dict(s.winner_hist)}\n\n")
             lengths = sorted(s.prompt_chars)
             f.write(
@@ -482,7 +571,8 @@ def write_report(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sources", default="arena", help="comma list: arena, routerbench")
+    ap.add_argument("--sources", default="arena",
+                    help="comma list: arena, routerbench, complexity_router")
     ap.add_argument("--out", type=Path, default=OUT_DEFAULT)
     ap.add_argument(
         "--epsilon",
@@ -497,10 +587,11 @@ def main() -> None:
     args = ap.parse_args()
 
     requested = {s.strip() for s in args.sources.split(",") if s.strip()}
-    unknown = requested - {"arena", "routerbench"}
+    unknown = requested - {"arena", "routerbench", "complexity_router"}
     if unknown:
         raise SystemExit(
-            f"unknown sources: {sorted(unknown)}; valid: arena, routerbench"
+            f"unknown sources: {sorted(unknown)}; valid: arena, routerbench, "
+            f"complexity_router"
         )
 
     registry = get_registry()
@@ -546,6 +637,22 @@ def main() -> None:
                 )
             else:
                 sources.append(("routerbench", "withmartian/routerbench", stats))
+                print(
+                    f"  scanned={stats.scanned} emitted={stats.emitted} "
+                    f"dup={stats.dup_skipped} unresolved={stats.unresolved_dropped}"
+                )
+        if "complexity_router" in requested:
+            print(f"building complexity_router ({COMPLEXITY_ROUTER_HF}, train) ...")
+            stats = SourceStats()
+            try:
+                build_complexity_router(out, stats, seen, args.limit)
+            except (DatasetNotFoundError, GatedRepoError) as e:
+                print(
+                    f"  SKIP complexity_router: inaccessible "
+                    f"({type(e).__name__}: {str(e)[:120]})"
+                )
+            else:
+                sources.append(("complexity_router", COMPLEXITY_ROUTER_HF, stats))
                 print(
                     f"  scanned={stats.scanned} emitted={stats.emitted} "
                     f"dup={stats.dup_skipped} unresolved={stats.unresolved_dropped}"
